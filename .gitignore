@@ -1,0 +1,36 @@
+# ---- Heavy generated data (reproducible via scripts/ ; distribute as a Release/Zenodo) ----
+# Raw API cache
+data/raw/
+
+# Sentinel-1 SAR chips (~70 MB of .npy)
+data/images/
+
+# Large panel exports (regenerate with scripts/run_all.py)
+data/processed/*.parquet
+data/processed/flood_dataset.csv
+data/processed/flood_dataset_compact.csv
+
+# Keep the small, structural dataset files that define the graph & labels:
+!data/processed/nodes.csv
+!data/processed/nodes_meta.csv
+!data/processed/edges.csv
+!data/processed/events.csv
+!data/processed/thresholds.json
+!data/processed/sample_preview.csv
+!data/processed/image_index.csv
+!data/processed/image_manifest.csv
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
