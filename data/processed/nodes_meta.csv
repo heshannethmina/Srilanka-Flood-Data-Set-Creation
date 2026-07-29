@@ -25,7 +25,6 @@ snap_lat,snap_lon,elevation_m,node_id,name,basin,lat,lon,position,downstream_of,
 7.271,80.598,296.6,MAH_PER,Peradeniya / Kandy,Mahaweli,7.271,80.598,mid,MAH_NUW,wet
 7.331,81.001,179.65,MAH_MHY,Mahiyanganaya,Mahaweli,7.331,81.001,mid,MAH_PER,intermediate
 7.921,81.101,51.07,MAH_MAN,Manampitiya (Polonnaruwa),Mahaweli,7.921,81.101,downstream,MAH_MHY,dry
-8.571,81.201,26.3,MAH_TRI,Trincomalee (Mahaweli mouth),Mahaweli,8.571,81.201,outlet,MAH_MAN,dry
 7.2,81.5,399.54,GAL_ING,Inginiyagala (Gal Oya reservoir),GalOya,7.2,81.5,upstream,,dry
 7.291,81.671,16.12,GAL_AMP,Ampara,GalOya,7.291,81.671,mid,GAL_ING,dry
 7.921,81.531,51.07,BAT_VAL,Valachchenai,Batticaloa,7.921,81.531,mid,,dry
@@ -43,7 +42,6 @@ snap_lat,snap_lon,elevation_m,node_id,name,basin,lat,lon,position,downstream_of,
 6.231,80.601,60.75,NIL_URA,Urubokka,Nilwala,6.231,80.601,upstream,NIL_PIT,wet
 7.241,80.781,681.44,MAH_VIC,Victoria reservoir (Teldeniya),Mahaweli,7.241,80.781,mid,MAH_PER,wet
 7.94,81.001,51.07,MAH_POL,Polonnaruwa town,Mahaweli,7.94,81.001,downstream,MAH_MHY,dry
-7.371,81.851,16.12,GAL_SAM,Samanthurai,GalOya,7.371,81.851,downstream,GAL_AMP,dry
 6.441,80.881,316.87,WAL_UDA,Udawalawe reservoir,Walawe,6.441,80.881,upstream,WAL_EMB,intermediate
 7.155,80.061,123.66,ATT_VEY,Veyangoda,AttanagaluOya,7.155,80.061,upstream,ATT_NIT,wet
 7.621,80.231,70.83,DED_WAR,Wariyapola,DeduruOya,7.621,80.231,upstream,DED_KUR,intermediate
