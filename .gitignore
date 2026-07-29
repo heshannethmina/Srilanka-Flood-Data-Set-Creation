@@ -4,6 +4,8 @@ data/raw/
 
 # Sentinel-1 SAR chips (~70 MB of .npy)
 data/images/
+data/images_png
+data/timeseries
 
 # Large panel exports (regenerate with scripts/run_all.py)
 data/processed/*.parquet
