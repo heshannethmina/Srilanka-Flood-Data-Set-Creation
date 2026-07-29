@@ -38,6 +38,8 @@ KNOWN_EVENTS = [
      ["Kelani", "Kalu", "AttanagaluOya"]),
     ("Jun 2024 SW / Western floods", "2024-06-01", "2024-06-12",
      ["Kelani", "Kalu", "Nilwala", "Gin"]),
+    ("Nov 2025 Cyclone Ditwah floods", "2025-11-23", "2025-11-30",
+     ["Kelani", "Kalu", "AttanagaluOya"]),
 ]
 
 

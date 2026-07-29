@@ -8,7 +8,7 @@ PROC_DIR = os.path.join(ROOT, "data", "processed")
 
 # --- Temporal coverage -------------------------------------------------------
 START_DATE = "2003-01-01"
-END_DATE = "2024-12-31"
+END_DATE = "2025-12-31"
 
 # --- API endpoints (no API key required) -------------------------------------
 POWER_URL = "https://power.larc.nasa.gov/api/temporal/daily/point"  # NASA POWER daily meteorology

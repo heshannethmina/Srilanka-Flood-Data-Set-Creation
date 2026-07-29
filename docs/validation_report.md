@@ -1,11 +1,11 @@
 # Validation & EDA Report — Sri Lanka Flood Dataset
 
-Generated over 51 nodes, 2003-01-01 → 2024-12-31.
+Generated over 51 nodes, 2003-01-01 → 2025-12-31.
 
 ## 1. Dataset size & class balance
 
-- Total node-days: **409,836**
-- Valid supervised samples: **408,255**
+- Total node-days: **410,931**
+- Valid supervised samples: **409,350**
 - Flood-state prevalence (primary 'high'): **1.90%**
 - Positive rate target_flood_1d (valid): **1.91%**
 - Positive rate target_flood_2d (valid): **2.29%**
@@ -15,7 +15,7 @@ Generated over 51 nodes, 2003-01-01 → 2024-12-31.
 
 Temporal split:
   - train: 277,899
-  - test: 74,460
+  - test: 75,555
   - val: 55,896
 Basin-holdout test basin = **Gin**: 32,020 samples held out
 
@@ -38,8 +38,9 @@ Detection window widened to ±4 days (downstream discharge peaks lag rain).
 | Dec 2019 floods | Kelani, Kalu, Gin | 1/16 | 16/16 | 0.990 | ✅ |
 | Nov 2021 Western floods | Kelani, Kalu, AttanagaluOya | 5/16 | 14/16 | 0.997 | ✅ |
 | Jun 2024 SW / Western floods | Kelani, Kalu, Nilwala, Gin | 14/20 | 19/20 | 0.994 | ✅ |
+| Nov 2025 Cyclone Ditwah floods | Kelani, Kalu, AttanagaluOya | 3/3 | 3/3 | 1.000 | ✅ |
 
-**Detection: 7/10 at the high threshold, 8/10 at the moderate threshold.** (✅ high · ◧ moderate-only · ⚠️ missed)
+**Detection: 8/11 at the high threshold, 9/11 at the moderate threshold.** (✅ high · ◧ moderate-only · ⚠️ missed)
 
 > Misses concentrate in **pre-2011 SW flash floods** (2003, 2014, 2017), where GloFAS reanalysis under-represents small, fast-responding wet-zone catchments. Post-2011 events are reliably captured. This is a known GloFAS limitation, documented rather than hidden.
 
@@ -48,7 +49,7 @@ Detection window widened to ±4 days (downstream discharge peaks lag rain).
 | Basin | Flood-days | Node-days | Rate % |
 |---|---|---|---|
 | Mahaweli | 1099 | 56252 | 1.95 |
-| Kelani | 1072 | 56252 | 1.91 |
+| Kelani | 1096 | 57347 | 1.91 |
 | Kalu | 717 | 40180 | 1.78 |
 | Gin | 665 | 32144 | 2.07 |
 | Nilwala | 628 | 32144 | 1.95 |
