@@ -32,7 +32,7 @@ early-warning research over Sri Lanka's major river basins, built entirely from
 | Rainfall, temperature, humidity, wind, radiation, **soil wetness** | **NASA POWER** daily API | MERRA-2 / GEOS assimilation |
 | River discharge (flood signal) | **Open-Meteo Flood API** | Copernicus **GloFAS** reanalysis |
 | Elevation | NASA POWER grid metadata | POWER/SRTM grid |
-| Terrain topology | Hand-built basin graph (`scripts/nodes.py`) | — |
+| Terrain topology | Hand-built basin graph (`scripts/common/nodes.py`) | — |
 
 See [`docs/SOURCES_AND_LICENSE.md`](docs/SOURCES_AND_LICENSE.md).
 
@@ -75,8 +75,8 @@ needed to rebuild the full dataset locally, or to inspect the structure directly
 
 ```bash
 pip install -r requirements.txt
-python scripts/01_download.py        # caches raw data (resumable, ~public API)
-python scripts/run_all.py            # features + labels + graph + validation
+python scripts/tabular/01_download.py     # caches raw data (resumable, ~public API)
+python scripts/tabular/run_all.py         # features + labels + graph + validation
 ```
 
 Outputs land in `data/processed/`:
@@ -100,16 +100,16 @@ samples align 1:1 for a fusion model). Fetched anonymously from Microsoft
 Planetary Computer — no account needed.
 
 ```bash
-python scripts/06_image_manifest.py        # build chip request list (3,489 chips)
-python scripts/07_fetch_images_mpc.py      # fetch Sentinel-1 chips (resumable)
-python scripts/image_loader.py             # pair chips with tabular features
+python scripts/imagery/06_image_manifest.py    # build chip request list (3,489 chips)
+python scripts/imagery/07_fetch_images_mpc.py  # fetch Sentinel-1 chips (resumable)
+python scripts/loaders/image_loader.py         # pair chips with tabular features
 ```
 Full details: [docs/IMAGE_DATASET.md](docs/IMAGE_DATASET.md).
 
 ## Use it in PyTorch
 
 ```bash
-python scripts/torch_loader.py           # sanity check
+python scripts/loaders/torch_loader.py           # sanity check
 # build_torch_geometric() returns X[T,N,F], y[T,N], edge_index, edge_weight
 ```
 

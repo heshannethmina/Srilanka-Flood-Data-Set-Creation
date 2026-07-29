@@ -51,7 +51,7 @@ the *label engine* for the imagery.
 
 ```bash
 pip install pystac-client planetary-computer rasterio pyproj
-python scripts/07_fetch_images_mpc.py            # full manifest (resumable, cached)
+python scripts/imagery/07_fetch_images_mpc.py    # full manifest (resumable, cached)
 
 # knobs (env vars):
 MAX_CHIPS=600        # only the first N manifest rows
@@ -67,7 +67,7 @@ IMG_WORKERS=3        # keep <=3 — MPC throttles anonymous signing above that
 ## Load it (pairs image + tabular for a fusion model)
 
 ```bash
-python scripts/image_loader.py     # sanity check
+python scripts/loaders/image_loader.py     # sanity check
 ```
 `image_loader.load_pairs()` returns, per fetched chip: the `[2,128,128]` SAR
 tensor, its label/severity, **and** the matching tabular feature row — ready to

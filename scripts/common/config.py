@@ -2,7 +2,7 @@
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, ".."))
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 RAW_DIR = os.path.join(ROOT, "data", "raw")
 PROC_DIR = os.path.join(ROOT, "data", "processed")
 

@@ -7,7 +7,7 @@ data/images/
 data/images_png
 data/timeseries
 
-# Large panel exports (regenerate with scripts/run_all.py)
+# Large panel exports (regenerate with scripts/tabular/run_all.py)
 data/processed/*.parquet
 data/processed/flood_dataset.csv
 data/processed/flood_dataset_compact.csv

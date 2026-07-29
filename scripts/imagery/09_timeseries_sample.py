@@ -22,7 +22,7 @@ Env knobs:
   MAX_FRAMES=0      cap frames per site (0 = all passes in the window)
 
 Needs: pip install pystac-client planetary-computer rasterio pyproj matplotlib
-Run:   python scripts/09_timeseries_sample.py
+Run:   python scripts/imagery/09_timeseries_sample.py
 """
 import os
 import sys
@@ -35,7 +35,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 import config as C
 
 warnings.filterwarnings("ignore")

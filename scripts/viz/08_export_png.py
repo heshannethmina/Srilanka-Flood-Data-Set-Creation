@@ -13,7 +13,7 @@ For each chip we write three PNGs so both radar channels are visible:
 Chips are sorted into flood/ and dry/ subfolders using image_index.csv labels.
 
 Usage:
-    python scripts/08_export_png.py
+    python scripts/viz/08_export_png.py
 Env knobs:
     OUT=data/images_png     output folder
     SCALE=2                 upscale factor (nearest) for easier viewing; 1 = native 128px
@@ -25,7 +25,7 @@ import pandas as pd
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, ".."))
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 IMG_DIR = os.path.join(ROOT, "data", "images")
 PROC = os.path.join(ROOT, "data", "processed")
 

@@ -111,7 +111,7 @@ def as_records():
 
 if __name__ == "__main__":
     import csv, os
-    out = os.path.join(os.path.dirname(__file__), "..", "data", "processed", "nodes.csv")
+    out = os.path.join(os.path.dirname(__file__), "..", "..", "data", "processed", "nodes.csv")
     out = os.path.abspath(out)
     with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)

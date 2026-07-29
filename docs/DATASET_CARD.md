@@ -25,7 +25,7 @@ flood-ML papers.
 - **Weather/soil:** Open-Meteo Archive API (ECMWF ERA5 / ERA5-Land reanalysis).
 - **Discharge:** Open-Meteo Flood API (Copernicus **GloFAS** reanalysis).
 - **Elevation:** Copernicus DEM via Open-Meteo.
-- All retrieved programmatically (`scripts/01_download.py`), UTC-aligned, cached
+- All retrieved programmatically (`scripts/tabular/01_download.py`), UTC-aligned, cached
   to parquet, fully resumable. No API key required.
 
 ## Labeling
@@ -39,7 +39,7 @@ per node without crossing node boundaries, so there is no temporal leakage into
 the target. `label_confidence` down-weights days near the threshold.
 
 ### Label validation
-`scripts/05_validate.py` cross-checks flood_state against **10 independently
+`scripts/tabular/05_validate.py` cross-checks flood_state against **10 independently
 documented flood episodes** (2003–2024). Results in `docs/validation_report.md`.
 
 ## Recommended use & splits
