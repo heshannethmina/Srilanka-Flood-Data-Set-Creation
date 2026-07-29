@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, ".."))
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 PROC = os.path.join(ROOT, "data", "processed")
 
 SEV_MAP = {"none": 0, "moderate": 1, "high": 2, "severe": 3}

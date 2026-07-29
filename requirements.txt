@@ -4,11 +4,11 @@ pandas>=1.5
 numpy>=1.23
 pyarrow>=10.0
 
-# Optional (for the example PyTorch loader in scripts/torch_loader.py)
+# Optional (for the example PyTorch loader in scripts/loaders/torch_loader.py)
 # torch>=2.0
 # torch-geometric>=2.4
 
-# Branch B — Sentinel-1 image fetching (scripts/07_fetch_images_mpc.py)
+# Branch B — Sentinel-1 image fetching (scripts/imagery/07_fetch_images_mpc.py)
 pystac-client>=0.7
 planetary-computer>=1.0
 rasterio>=1.3

@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PROC = os.path.abspath(os.path.join(HERE, "..", "data", "processed"))
+PROC = os.path.abspath(os.path.join(HERE, "..", "..", "data", "processed"))
 
 # Dynamic feature columns fed to the model (edit as needed)
 DYNAMIC_FEATURES = [

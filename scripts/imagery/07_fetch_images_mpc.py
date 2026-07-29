@@ -18,7 +18,7 @@ Env knobs:
   MAX_CHIPS=N     only fetch the first N manifest rows (for a quick subset)
   IMG_WORKERS=K   parallel workers (default 4)
 
-Run:  python 07_fetch_images_mpc.py
+Run:  python scripts/imagery/07_fetch_images_mpc.py
 """
 import os
 import sys
@@ -28,7 +28,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 import config as C
 
 warnings.filterwarnings("ignore")
