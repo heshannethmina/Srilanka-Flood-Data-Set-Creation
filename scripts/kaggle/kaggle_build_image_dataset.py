@@ -104,11 +104,15 @@ STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 os.makedirs(FRAMES, exist_ok=True)
 
 # GDAL tuning for remote COG reads — without these every read re-lists the bucket.
+# DO NOT set CPL_VSIL_CURL_ALLOWED_EXTENSIONS here: Planetary Computer signed URLs
+# end in "?st=...&sig=..." rather than ".tif", so an extension allow-list makes
+# GDAL refuse every single asset (symptom: ok=0, every frame errors on /vsicurl/).
 os.environ.update({
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
-    "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif",
     "GDAL_HTTP_MULTIRANGE": "YES",
     "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
+    "GDAL_HTTP_MAX_RETRY": "5",
+    "GDAL_HTTP_RETRY_DELAY": "2",
     "VSI_CACHE": "TRUE",
     "VSI_CACHE_SIZE": "100000000",
 })
@@ -353,10 +357,10 @@ def build_frame(t):
                     np.save(npy, np.stack([vv, vh]).astype("float16"))
                 break
             except Exception as e:
-                last = str(e)[:80]
+                last = f"{type(e).__name__}: {e}"      # full message, never truncated
                 time.sleep(2 * (a + 1))
         else:
-            print(f"    ! {site_id} {day}: {last}")
+            print(f"    ! {site_id} {day}: {last}", flush=True)
             return None
 
     p = item.properties
@@ -371,6 +375,22 @@ def build_frame(t):
     row.update(sar_features(vv, vh, has_vh))
     return row
 
+
+# ---- SMOKE TEST: prove one read works before burning two hours on 2,500 -------
+# If this raises, the full run would have produced ok=0. Fix here, not after.
+print("=== SMOKE TEST: one frame ===")
+_sid, _n, _b, _la, _lo, _day, _item = TASKS[0]
+try:
+    _vv = read_band(_item.assets["vv"].href, _lo, _la, 64)
+    print(f"  OK {_sid} {_day}  shape={_vv.shape}  "
+          f"dB min/mean/max = {_vv.min():.1f}/{_vv.mean():.1f}/{_vv.max():.1f}")
+except Exception as e:
+    print(f"  FAILED -> {type(e).__name__}: {e}")
+    print("  trying the whole-item signing fallback ...")
+    _signed = pc.sign(_item)
+    _vv = read_band(_signed.assets["vv"].href, _lo, _la, 64)
+    print(f"  fallback OK, shape={_vv.shape} — set SIGN_WHOLE_ITEM = True")
+    raise SystemExit("Stop here and switch to the fallback before the full run.")
 
 print("=== STEP 3: fetching frames ===")
 rows, done = [], 0
