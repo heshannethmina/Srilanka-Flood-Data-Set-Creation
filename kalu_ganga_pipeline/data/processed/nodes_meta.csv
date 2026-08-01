@@ -1,0 +1,6 @@
+snap_lat,snap_lon,elevation_m,node_id,name,basin,lat,lon,position,downstream_of,zone
+6.652,80.698,316.87,KAL_BAL,Balangoda (upper Kalu),Kalu,6.652,80.698,upstream,,wet
+6.683,80.4,316.87,KAL_RAT,Ratnapura,Kalu,6.683,80.4,mid,KAL_BAL,wet
+6.66,80.19,87.06,KAL_BUL,Bulathsinhala,Kalu,6.66,80.19,mid,KAL_RAT,wet
+6.535,80.15,87.06,KAL_AGA,Agalawatta,Kalu,6.535,80.15,mid,KAL_BUL,wet
+6.583,79.96,87.06,KAL_KLT,Kalutara (Kalu mouth),Kalu,6.583,79.96,outlet,KAL_AGA,wet

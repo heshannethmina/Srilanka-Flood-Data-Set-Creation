@@ -1,0 +1,37 @@
+{
+  "KAL_BAL": {
+    "moderate": 23.21,
+    "high": 39.09,
+    "severe": 53.732499999999916,
+    "annmax_median": 49.23,
+    "q_mean_train": 11.107050556670927
+  },
+  "KAL_RAT": {
+    "moderate": 98.54,
+    "high": 157.49,
+    "severe": 202.54799999999906,
+    "annmax_median": 196.24,
+    "q_mean_train": 47.8935736448257
+  },
+  "KAL_BUL": {
+    "moderate": 4.08,
+    "high": 6.698799999999992,
+    "severe": 9.77489999999997,
+    "annmax_median": 8.46,
+    "q_mean_train": 2.373460485490053
+  },
+  "KAL_AGA": {
+    "moderate": 3.29,
+    "high": 5.44,
+    "severe": 8.612499999999919,
+    "annmax_median": 6.29,
+    "q_mean_train": 1.8690892498631138
+  },
+  "KAL_KLT": {
+    "moderate": 398.20399999999984,
+    "high": 632.0523999999994,
+    "severe": 852.6552999999955,
+    "annmax_median": 740.31,
+    "q_mean_train": 213.6279029019894
+  }
+}
