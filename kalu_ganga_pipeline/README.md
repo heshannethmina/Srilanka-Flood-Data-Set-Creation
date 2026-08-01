@@ -116,6 +116,21 @@ Footprint : ~2.56 km × 2.56 km window around the river node
 MAX_CHIPS=10 python 07_fetch_images.py
 ```
 
+## View the images
+
+After `07_fetch_images.py` has created `.npy` chips in `data/images/`, use
+the viewer scripts in `viz/`:
+
+```bash
+pip install -r requirements.txt
+python viz/preview_chips.py
+python viz/08_export_png.py
+```
+
+- `viz/preview_chips.py` writes small contact-sheet previews to `data/preview/`.
+- `viz/08_export_png.py` exports every `.npy` chip to viewable PNGs in `data/png_images/`.
+- The `.npy` files are the real radar data; PNGs are for inspection only.
+
 ---
 
 ## Data Sources (all free, no API key)

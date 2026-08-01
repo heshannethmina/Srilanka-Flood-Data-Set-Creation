@@ -8,3 +8,5 @@ pystac-client>=0.7
 planetary-computer>=1.0
 rasterio>=1.3
 pyproj>=3.5
+pillow>=10.0
+matplotlib>=3.7
