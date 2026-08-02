@@ -51,15 +51,31 @@ def require_kaggle() -> None:
 def find_input(filename: str, hint: str) -> Optional[str]:
     """Locate a mounted dataset by a file it must contain.
 
-    Kaggle names each mount after the dataset slug, and slugs change when a
-    dataset is re-published — so searching for the file is more durable than
-    hard-coding the path.
+    Searched recursively and at any depth: Kaggle names each mount after the
+    dataset slug, slugs change when a dataset is re-published, and the mount
+    layout itself varies (`/kaggle/input/<slug>/` in the classic form,
+    `/kaggle/input/datasets/<owner>/<slug>/<version>/` in the newer one).
+    Hunting for the file is the only durable way to find it.
     """
-    for depth in ("*", "*/*"):
-        for path in sorted(glob.glob(f"/kaggle/input/{depth}/{filename}")):
-            return os.path.dirname(path)
+    hits = sorted(glob.glob(f"/kaggle/input/**/{filename}", recursive=True),
+                  key=len)          # shallowest match wins
+    if hits:
+        return os.path.dirname(hits[0])
     print(f"[warn] {filename} not found under /kaggle/input — {hint}")
     return None
+
+
+def show_inputs() -> None:
+    """Print what is actually mounted, so a miss is diagnosable from the log."""
+    found = [p for p in glob.glob("/kaggle/input/**/*", recursive=True)
+             if os.path.isfile(p)]
+    if not found:
+        print("[input] /kaggle/input holds no files — attach the datasets via "
+              "'Add Input' in the notebook's right-hand panel")
+        return
+    print(f"[input] {len(found)} files mounted; a sample:")
+    for p in sorted(found, key=len)[:12]:
+        print(f"        {p}")
 
 
 def report_env() -> None:
@@ -173,6 +189,7 @@ def main() -> None:
     root = find_input("flood_dataset.parquet",
                       "attach uom230429e/sri-lanka-flood-tabular-graph-2003-2025")
     if root is None:
+        show_inputs()
         sys.exit("[fatal] the tabular dataset is required by every stage")
     sar_root = find_input("image_dataset.csv",
                           "the sar stage will be skipped")
