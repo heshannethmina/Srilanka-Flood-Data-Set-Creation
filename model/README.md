@@ -34,11 +34,29 @@ Kaggle**. It exits immediately anywhere else.
 !python /kaggle/working/repo/model/kaggle_run.py --stage baselines
 ```
 
+## Save & Run All
+
+[`../notebooks/tfstgnn_kaggle.ipynb`](../notebooks/tfstgnn_kaggle.ipynb) is a
+ready-made notebook for batch execution: import it on Kaggle
+(**File → Import Notebook**), attach the two datasets, set the accelerator to GPU
+and internet to On, then **Save & Run All (Commit)**.
+
+Two properties make that safe to leave unattended:
+
+- **A time budget.** Kaggle kills a GPU session at ~9 h and a killed session
+  saves nothing. Stages run cheapest-and-most-decisive first, and any stage that
+  will not fit inside `--time-budget-hours` (default 8) is skipped with the exact
+  command to finish it in a second session.
+- **Per-stage fault isolation.** A stage that crashes is logged and the run
+  continues; four finished stages are never lost to the fifth one failing. The
+  process still exits non-zero, so a failure is visible rather than silent. The
+  ladder isolates each preset individually too, so losing M5 does not lose M0–M4.
+
 ## Stages
 
-Run them one at a time. Kaggle GPU sessions cap at ~9–12 hours and `--stage all`
-can exceed that; each stage writes its own JSON, so a session that dies partway
-loses only the stage in flight.
+Kaggle GPU sessions cap at ~9–12 hours and the full set exceeds that; each stage
+writes its own JSON, so a session that dies partway loses only the stage in
+flight.
 
 | Stage | What it does | Answers | Rough cost |
 |---|---|---|---|
@@ -49,9 +67,10 @@ loses only the stage in flight.
 | `sar` | M6_scalars then M6_cnn | **RQ5** | 3–5 h |
 | `all` | all of the above, in order | — | likely over one session |
 
-Useful flags: `--epochs` (default 60, early stopping usually fires sooner),
-`--seeds` (ensemble size, default 5), `--image-px` (256 by default; 512 is the
-native frame size but quadruples activation memory), `--batch-size` (M6_cnn only).
+Useful flags: `--time-budget-hours` (default 8), `--epochs` (default 60, early
+stopping usually fires sooner), `--seeds` (ensemble size, default 5),
+`--image-px` (256 by default; 512 is the native frame size but quadruples
+activation memory), `--batch-size` (M6_cnn only).
 
 ## Output
 

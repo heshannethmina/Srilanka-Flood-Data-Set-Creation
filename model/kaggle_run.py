@@ -29,12 +29,21 @@ import json
 import os
 import sys
 import time
+import traceback
 from typing import Dict, List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 RUNS = "/kaggle/working/runs"
+
+ORDER = ["baselines", "ladder", "leakage", "spatial", "sar"]
+
+#: Rough hours per stage, used only to decide whether one still fits in the
+#: session budget. Cheap-and-decisive stages run first so that a session which
+#: runs out of time has still produced the results that matter most.
+ESTIMATE_H = {"baselines": 0.2, "ladder": 3.5, "leakage": 0.5,
+              "spatial": 0.5, "sar": 4.0}
 
 
 # --------------------------------------------------------------- environment
@@ -101,8 +110,14 @@ def stage_ladder(root: str, epochs: int, seeds: Optional[int]) -> Dict:
     for preset in ("M0", "M1", "M2", "M3", "M4", "M5"):
         # M5 is the 5-seed ensemble; the rest are single-seed by definition.
         n = seeds if preset == "M5" else 1
-        out[preset] = run(preset=preset, protocol="temporal", root=root,
-                          out_dir=RUNS, epochs=epochs, n_seeds=n)
+        try:
+            out[preset] = run(preset=preset, protocol="temporal", root=root,
+                              out_dir=RUNS, epochs=epochs, n_seeds=n)
+        except Exception:
+            # The ladder is the longest stage; losing M5 should not also lose
+            # M0-M4, which are already written to disk.
+            print(f"[ladder] {preset} FAILED — continuing with the next step")
+            traceback.print_exc()
     return out
 
 
@@ -171,8 +186,10 @@ def summarise() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Run the TF-STGNN model on Kaggle.")
-    ap.add_argument("--stage", default="all",
-                    choices=["all", "baselines", "ladder", "leakage", "spatial", "sar"])
+    ap.add_argument("--stage", default="all", choices=["all"] + ORDER)
+    ap.add_argument("--time-budget-hours", type=float, default=8.0,
+                    help="stop starting new stages past this; Kaggle kills a GPU "
+                         "session at ~9 h, and a killed session saves nothing")
     ap.add_argument("--epochs", type=int, default=60)
     ap.add_argument("--seeds", type=int, default=5,
                     help="ensemble size for M5/M6 (§7.7 uses 5)")
@@ -195,26 +212,52 @@ def main() -> None:
                           "the sar stage will be skipped")
     print(f"[data] tabular {root}\n[data] sar     {sar_root}")
 
-    stages = (["baselines", "ladder", "leakage", "spatial", "sar"]
-              if a.stage == "all" else [a.stage])
+    stages = ORDER if a.stage == "all" else [a.stage]
+    started = time.time()
+    done: List[str] = []
+    skipped: List[str] = []
+    failed: List[str] = []
 
     for name in stages:
+        elapsed_h = (time.time() - started) / 3600.0
+        est = ESTIMATE_H.get(name, 1.0)
+        if len(stages) > 1 and elapsed_h + est > a.time_budget_hours:
+            print(f"\n[skip] {name}: ~{est:.1f} h needed, only "
+                  f"{a.time_budget_hours - elapsed_h:.1f} h of budget left. "
+                  f"Run it in a fresh session:\n"
+                  f"       !python {os.path.abspath(__file__)} --stage {name}")
+            skipped.append(name)
+            continue
+
         t0 = time.time()
         print(f"\n{'#' * 70}\n# stage: {name}\n{'#' * 70}")
-        if name == "baselines":
-            stage_baselines(root)
-        elif name == "ladder":
-            stage_ladder(root, a.epochs, a.seeds)
-        elif name == "leakage":
-            stage_leakage(root, a.epochs)
-        elif name == "spatial":
-            stage_spatial(root, a.epochs)
-        elif name == "sar":
-            stage_sar(root, sar_root, a.epochs, a.seeds, a.image_px, a.batch_size)
-        print(f"[stage {name}] done in {(time.time() - t0) / 60:.1f} min")
+        try:
+            if name == "baselines":
+                stage_baselines(root)
+            elif name == "ladder":
+                stage_ladder(root, a.epochs, a.seeds)
+            elif name == "leakage":
+                stage_leakage(root, a.epochs)
+            elif name == "spatial":
+                stage_spatial(root, a.epochs)
+            elif name == "sar":
+                stage_sar(root, sar_root, a.epochs, a.seeds, a.image_px,
+                          a.batch_size)
+            done.append(name)
+            print(f"[stage {name}] done in {(time.time() - t0) / 60:.1f} min")
+        except Exception:
+            # A batch run must not lose four finished stages to the fifth one
+            # crashing — record it, keep going, and surface it in the summary.
+            failed.append(name)
+            print(f"[stage {name}] FAILED after {(time.time() - t0) / 60:.1f} min")
+            traceback.print_exc()
 
     summarise()
-    print(f"\nResults in {RUNS} — 'Save Version' to keep them as notebook output.")
+    print(f"\n[session] {(time.time() - started) / 3600.0:.2f} h · "
+          f"done {done or '-'} · skipped {skipped or '-'} · failed {failed or '-'}")
+    print(f"Results in {RUNS} — 'Save Version' keeps them as notebook output.")
+    if failed:
+        sys.exit(f"[fatal] {len(failed)} stage(s) failed: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
