@@ -4,9 +4,11 @@ pandas>=1.5
 numpy>=1.23
 pyarrow>=10.0
 
-# Optional (for the example PyTorch loader in scripts/loaders/torch_loader.py)
+# Model — src/tfstgnn (see docs/MODEL.md). Deliberately no torch-geometric:
+# the relational GATv2 is implemented directly on torch scatter ops.
 # torch>=2.0
-# torch-geometric>=2.4
+# lightgbm>=4.0     # baseline 4 (falls back to scikit-learn if absent)
+# pillow>=10.0      # SAR frame decoding, M6_cnn only
 
 # Branch B — Sentinel-1 image fetching (scripts/imagery/07_fetch_images_mpc.py)
 pystac-client>=0.7

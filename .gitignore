@@ -22,6 +22,11 @@ data/processed/flood_dataset_compact.csv
 !data/processed/image_index.csv
 !data/processed/image_manifest.csv
 
+# ---- Model runs (regenerate with `python -m tfstgnn.train`) ----
+runs/
+*.pt
+*.ckpt
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

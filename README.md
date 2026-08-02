@@ -106,6 +106,29 @@ python scripts/loaders/image_loader.py         # pair chips with tabular feature
 ```
 Full details: [docs/IMAGE_DATASET.md](docs/IMAGE_DATASET.md).
 
+## The model — TF-STGNN
+
+Dataset creation ([`scripts/`](scripts/)) and model creation ([`model/`](model/))
+are kept in separate directories with no shared entry point.
+
+The baseline architecture from the proposal (§7.7) lives in
+[`model/tfstgnn/`](model/tfstgnn/): a GRU temporal encoder with FiLM terrain
+conditioning, an optional Sentinel-1 CNN branch, and a relational GATv2 that
+keeps directed flow edges separate from spatial ones — no PyTorch Geometric
+required.
+
+It runs on Kaggle. Attach both published datasets to a GPU notebook, then:
+
+```python
+!git clone -q https://github.com/heshannethmina/Srilanka-Flood-Data-Set-Creation /kaggle/working/repo
+!python /kaggle/working/repo/model/kaggle_run.py --stage baselines
+!python /kaggle/working/repo/model/kaggle_run.py --stage ladder
+```
+
+Stages: `baselines` · `ladder` (M0→M5) · `leakage` (RQ2) · `spatial` · `sar`
+(RQ5). See [model/README.md](model/README.md) for the runbook and
+[docs/MODEL.md](docs/MODEL.md) for the design rationale.
+
 ## Use it in PyTorch
 
 ```bash
