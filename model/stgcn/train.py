@@ -130,10 +130,11 @@ def train_one(panel: Panel, mcfg: STGCNModelConfig, tcfg: STGCNTrainConfig,
                 torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
             opt.step()
 
-            total_loss += float(loss)
-            total_cls += float(loss_dict["cls"])
-            total_reg += float(loss_dict["reg"])
+            total_loss += float(loss.detach())
+            total_cls += float(loss_dict["cls"].detach())
+            total_reg += float(loss_dict["reg"].detach())
             n_batches += 1
+
 
         sched.step()
 
@@ -222,7 +223,8 @@ def run_stgcn(
             print("[STGCN calibrate] isotonic regression")
 
     # Optimal threshold selection on validation set
-    best_thr = best_threshold(y_val, val_prob, metric="f1")
+    best_thr = best_threshold(y_val, val_prob, criterion="f1")
+
 
     # Final evaluation
     val_eval = evaluate(y_val, val_prob, best_thr, va_res["event"], va_res["day"], va_res["node"])
