@@ -7,7 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import STGCNModelConfig
+try:
+    from stgcn.config import STGCNModelConfig
+except (ImportError, ValueError):
+    from .config import STGCNModelConfig
+
 
 
 class TemporalConvBlock(nn.Module):

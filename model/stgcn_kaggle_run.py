@@ -17,10 +17,19 @@ import time
 from typing import Dict, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
-from stgcn.config import STGCNModelConfig, STGCNTrainConfig
-from stgcn.train import run_stgcn
+try:
+    from stgcn.config import STGCNModelConfig, STGCNTrainConfig
+    from stgcn.train import run_stgcn
+except (ImportError, ValueError):
+    from model.stgcn.config import STGCNModelConfig, STGCNTrainConfig
+    from model.stgcn.train import run_stgcn
+
 
 
 def find_data_root() -> Optional[str]:

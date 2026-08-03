@@ -13,13 +13,26 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import torch
 
-from ..tfstgnn.calibrate import apply_temperature, fit_isotonic, fit_temperature
-from ..tfstgnn.data import Panel, SnapshotBatcher, build_panel, load_panel
-from ..tfstgnn.graph import build_graph
-from ..tfstgnn.losses import MultiHeadLoss
-from ..tfstgnn.metrics import best_threshold, evaluate
-from .config import STGCNModelConfig, STGCNTrainConfig
-from .stgcn_model import STGCNModel
+try:
+    from tfstgnn.calibrate import apply_temperature, fit_isotonic, fit_temperature
+    from tfstgnn.data import Panel, SnapshotBatcher, build_panel, load_panel
+    from tfstgnn.graph import build_graph
+    from tfstgnn.losses import MultiHeadLoss
+    from tfstgnn.metrics import best_threshold, evaluate
+except (ImportError, ValueError):
+    from ..tfstgnn.calibrate import apply_temperature, fit_isotonic, fit_temperature
+    from ..tfstgnn.data import Panel, SnapshotBatcher, build_panel, load_panel
+    from ..tfstgnn.graph import build_graph
+    from ..tfstgnn.losses import MultiHeadLoss
+    from ..tfstgnn.metrics import best_threshold, evaluate
+
+try:
+    from stgcn.config import STGCNModelConfig, STGCNTrainConfig
+    from stgcn.stgcn_model import STGCNModel
+except (ImportError, ValueError):
+    from .config import STGCNModelConfig, STGCNTrainConfig
+    from .stgcn_model import STGCNModel
+
 
 
 def resolve_device(spec: str = "auto") -> torch.device:

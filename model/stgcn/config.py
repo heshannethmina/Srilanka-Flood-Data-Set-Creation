@@ -3,10 +3,17 @@
 from dataclasses import dataclass, field
 from typing import Dict, Literal, Optional
 
-from ..tfstgnn.config import (
-    CLS_HEADS, DYNAMIC_FEATURES, REG_HEADS, STATIC_DIM,
-    LossName, Protocol, TrainConfig,
-)
+try:
+    from tfstgnn.config import (
+        CLS_HEADS, DYNAMIC_FEATURES, REG_HEADS, STATIC_DIM,
+        LossName, Protocol, TrainConfig,
+    )
+except (ImportError, ValueError):
+    from ..tfstgnn.config import (
+        CLS_HEADS, DYNAMIC_FEATURES, REG_HEADS, STATIC_DIM,
+        LossName, Protocol, TrainConfig,
+    )
+
 
 
 @dataclass
