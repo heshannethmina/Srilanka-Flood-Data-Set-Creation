@@ -1,10 +1,10 @@
 %%
-%% Phase 1 Project Proposal for CS3631
+%% Phase 1 Project Proposal for CS3631 -- 2 page limit excluding references.
 %% Terrain-Aware Multimodal Spatiotemporal Graph Neural Network
 %% for Probabilistic Flood Early Warning in Sri Lanka
 %%
-%% Results in Sections 3.3 and 6 are from the full experimental run of
-%% 2026-08-02 (single Tesla T4, 5.07 h, all stages completed).
+%% All numbers are measured: full experimental run 2026-08-02, single Tesla T4,
+%% 5.07 h, all stages completed. Reproduce with model/kaggle_run.py --stage all
 %%
 
 \documentclass[sigconf]{acmart}
@@ -15,6 +15,9 @@
 \acmConference[CS3631]{CS3631 Deep Neural Networks Project}{August 2026}{University}
 \acmISBN{000-0-0000-0000-0}
 
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+
 \begin{document}
 
 \title{Terrain-Aware Multimodal Spatiotemporal Graph Neural Network for Probabilistic Flood Early Warning in Sri Lanka}
@@ -24,259 +27,169 @@
 \author{Author Three}
 \author{Author Four}
 \author{Author Five}
-
 \affiliation{%
   \institution{Department of Computer Science}
   \country{Sri Lanka}
 }
 
 \begin{abstract}
-This project develops a terrain-aware, multimodal spatiotemporal graph neural network (TF-STGNN) for calibrated 24-hour-ahead flood probability forecasting across 51 hydrologically anchored monitoring nodes in 16 Sri Lankan river basins. We construct a reproducible, leakage-controlled benchmark from public reanalysis sources and implement a multi-relational graph architecture that encodes directed river topology alongside spatial proximity. A full ablation ladder (M0--M6) was executed under three mutually exclusive evaluation protocols. Three findings emerge. First, the strongest result is methodological: replacing the temporal split with a random split raises test PR-AUC from 0.704 to 0.905 while pre-onset event detection \emph{collapses} from 0.380 to 0.089---leakage does not merely inflate the reported score, it selects a different model that ranks well and warns nobody. Second, no neural configuration beats a gradient-boosted-tree baseline on PR-AUC (0.742 vs.\ 0.850), because the 24-hour target is dominated by discharge autocorrelation; but every graph configuration beats every baseline on pre-onset event detection, by up to $1.8\times$. Third, terrain conditioning via FiLM is the single largest architectural gain ($+0.105$ PR-AUC), whereas directed flow edges and Sentinel-1 SAR fusion both yield null results under the current formulation. We report the negative results in full and identify the mechanism---zero-lag message passing on a system with multi-day travel times---that motivates the next iteration.
+We propose a terrain-aware multimodal spatiotemporal graph neural network (TF-STGNN) for calibrated 24-hour-ahead flood probability forecasting at 51 nodes across 16 Sri Lankan river basins, trained on a leakage-controlled benchmark built entirely from public, key-free sources. The contribution spans four families: a \emph{flow-lagged relational attention} mechanism respecting multi-day channel travel times, a \emph{FiLM terrain fusion} strategy, a multi-relational \emph{graph representation}, and an \emph{onset-weighted training objective} distilled to single-network inference. Preliminary results confirm feasibility---the full ablation ladder and three evaluation protocols complete in 5.07\,h on one free-tier GPU---and already show the terrain-fused graph model exceeding a published STGCN baseline by $+0.079$ PR-AUC while detecting $1.8\times$ more flood episodes before onset.
 \end{abstract}
 
-\keywords{flood early warning, graph neural networks, spatiotemporal forecasting, probability calibration, data leakage, Sri Lanka}
+\keywords{flood early warning, graph neural networks, attention mechanisms, probability calibration, data leakage}
 
 \maketitle
 
 \section{Problem Motivation}
 
-Sri Lanka experiences recurrent monsoon-driven riverine flooding. The southwest monsoon (May--September) floods steep, fast-responding wet-zone basins (Kelani, Kalu, Gin, Nilwala); the northeast monsoon (December--February) floods dry-zone rivers. Major events in 2003, 2011, 2016, 2017, 2021, and 2024 each displaced large populations.
+Sri Lanka experiences recurrent monsoon-driven riverine flooding. The southwest monsoon (May--September) floods steep, fast-responding wet-zone basins (Kelani, Kalu, Gin, Nilwala); the northeast monsoon (December--February) floods dry-zone rivers. Events in 2003, 2011, 2016, 2017, 2021 and 2024 each displaced large populations.
 
-Effective early warning requires \textit{lead time} (forecast, not nowcast), \textit{spatial specificity} (node-level predictions), and \textit{calibrated confidence} (actionable probabilities). Three failures recur in flood-ML literature: (1) spatial models discard directed river flow, using Euclidean proximity or grids instead; (2) random splits on autocorrelated data place flood days from the same event in train and test, inflating reported skill; (3) thresholded point predictions are uncalibrated. No ML-ready Sri Lankan benchmark exists; published work uses tens of samples. This project constructs a benchmark two orders of magnitude larger from public, key-free sources.
+\textbf{The requirement is difficult on three axes at once.} Warning needs \emph{lead time} (a forecast, not a nowcast), \emph{spatial specificity} (which river reach, not which province), and \emph{calibrated confidence}---an evacuation decision needs a probability that means what it says. Meeting all three under \emph{severe resource constraints} is the practical problem: a national system in a lower-middle-income country cannot depend on paid data feeds, in-situ telemetry at every reach, or sustained GPU capacity. Zero monetary cost and free-tier compute are therefore design constraints, not conveniences, and they motivate the efficiency contribution in Section~\ref{sec:novelty}.
+
+\textbf{Who benefits.} The Disaster Management Centre and Irrigation Department, which currently issue basin-level rather than reach-level advisories; residents of the $\sim$1.2\,M-person Kelani floodplain; and the flood-ML community, for whom we release the first ML-ready Sri Lankan benchmark.
+
+\textbf{Three failures recur in the deep flood-forecasting literature} and shape our contribution: (1) spatiotemporal networks discard directed river flow, substituting Euclidean proximity or regular grids, so messages propagate against the physics; (2) random cross-validation on autocorrelated data places days from the same flood event in train and test; (3) thresholded point predictions are uncalibrated and cannot support graded response.
 
 \section{Identified Dataset}
 
-We construct a multimodal panel of 51 nodes across 16 basins (2003--2025). All sources are public, require no API key, and are programmatically acquired, cached, and resumable:
+We construct a multimodal node--day panel covering 51 nodes in 16 basins, 2003--2025. All sources are public, key-free and programmatically cached: \textbf{meteorology} (precipitation, temperature, humidity, wind, radiation, soil wetness) from Open-Meteo Archive (ERA5-Land) and NASA POWER; \textbf{discharge} from Copernicus GloFAS reanalysis; \textbf{terrain} from Copernicus DEM; \textbf{Sentinel-1 RTC SAR} via Microsoft Planetary Computer.
 
-\begin{itemize}
-\item \textbf{Precipitation, temperature, humidity, wind, radiation, soil wetness:} Open-Meteo Archive (ERA5-Land, 0.1°), NASA POWER (MERRA-2, $\sim$0.5°)
-\item \textbf{River discharge:} Open-Meteo Flood API / Copernicus GloFAS reanalysis ($\sim$0.05°)
-\item \textbf{Terrain:} Copernicus DEM
-\item \textbf{SAR imagery (case study):} Sentinel-1 RTC via Microsoft Planetary Computer
-\end{itemize}
+The panel holds 410,931 node-days $\times$ 67 features. After 30-day warm-up and causal truncation the modelled tensor is $8{,}036 \times 51 \times 33$ dynamic features plus 9 static terrain descriptors. \textbf{Labels:} flood state is $Q_v(t) \ge q_v^{(0.98)}$, the 98th percentile of training-period discharge at node $v$; the primary target is 24-hour-ahead flood probability, computed causally within node boundaries. The benchmark contains 1,469 episodes (mean 5.39 days, IQR 2--6).
 
-\textbf{Measurements.} The constructed panel holds 410,931 node-days $\times$ 67 features. After the 30-day warm-up and end-of-series truncation required for causal targets, the modelled tensor is $8{,}036 \text{ days} \times 51 \text{ nodes} \times 33$ dynamic features (409,836 node-days), plus 9 static terrain descriptors per node. The benchmark contains 1,469 flood events (mean duration 5.39 days, IQR 2--6). Graph: 51 nodes, 35 directed upstream$\to$downstream edges, 204 spatial $k$-NN edges ($k=4$, weight $\exp(-d/40\text{ km})$), and 51 self-loops, held as three distinct relations.
+\textbf{Graph:} 51 nodes; 35 directed upstream$\to$downstream edges (never symmetrised), 204 spatial $k$-NN edges ($k{=}4$, weight $\exp(-d/40\,\mathrm{km})$), 51 self-loops, held as three distinct relations. Edge attributes carry distance and elevation drop.
 
-\textbf{Labels.} Flood state at node $v$, day $t$ is $Q_v(t) \geq q_v^{(0.98)}$ (98th percentile of training-period discharge). Three variants are provided (90th, 98th, 99.5th percentile). Primary target: 24-hour-ahead binary flood probability. All targets are causal, computed within node boundaries, with 30-day warm-up enforced.
-
-\textbf{Evaluation splits (precomputed, not random).} Temporal: train $\leq 2017$ (277,899 samples, 2.028\% positive), validation 2018--2020 (55,896, 0.810\%), test 2021+ (74,463, 2.276\%). Basin holdout (Gin): train 324,726, validation 51,512, test 32,020. Event-level GroupKFold over 1,469 groups. A random split is retained \emph{as a diagnostic only}, to quantify leakage (Section~\ref{sec:leakage}).
-
-The marked prevalence difference between the validation block (0.810\%) and the test block (2.276\%) is a property of the record, not of the split construction: 2018--2020 was hydrologically quiet. This motivates the episode-level early-stopping signal described in Section~\ref{sec:metrics}.
+\textbf{Splits are precomputed, not random.} Temporal: train $\le$2017 (277,899 node-days, 2.028\% positive), validation 2018--2020 (55,896, 0.810\%), test 2021+ (74,463, 2.276\%). Basin holdout (Gin): 324,726/51,512/32,020. A random split is retained \emph{as a diagnostic only}, to quantify leakage.
 
 \section{Baseline Model}
 
-\subsection{Architecture}
+\subsection{Model Architecture}
 
-Baseline: gradient-boosted tree ensemble (LightGBM) on flattened 33 dynamic features (rainfall, discharge trajectories, soil moisture, engineered 2/3/5/7/10/15/30-day accumulations, Antecedent Precipitation Index, $z$-scores, empirical percentiles) plus static terrain descriptors, giving a design matrix of $277{,}899 \times 174$. This represents the operational discharge-percentile rule: what GloFAS already provides directly.
+The deep baseline (\textbf{M0}) is a per-node recurrent encoder with no graph and no terrain conditioning: a 2-layer GRU (hidden 128, dropout 0.2) over a 30-day lookback of the 33 dynamic channels, pooled by additive temporal attention rather than last-state, feeding a two-layer MLP head (256$\to$128). It is multitask---four classification heads (1/2/3-day flood, 1-day onset) and auxiliary regression heads---and totals 294,727 parameters. This isolates the temporal stream so that every later step measures exactly one added component.
 
-Additional baselines implemented: persistence, per-node climatology, the discharge-percentile rule, and a spatial-only STGCN~\cite{STGCN2018}.
+We additionally implement \textbf{STGCN}~\cite{STGCN2018} as a published spatiotemporal-GNN reference, and retain a LightGBM ensemble as a \emph{non-neural} reference bar representing the operational discharge-percentile rule that GloFAS already provides.
 
-\subsection{Baseline Model Experimental Setup}
+\subsection{Implementation Details}
 
-Training uses the precomputed temporal split (train 2003--2017). Early stopping on validation episode-level PR-AUC (not accuracy). Probabilities are calibrated by isotonic regression fit on the validation block only; the decision threshold is selected on validation.
+One training example is a full-graph day snapshot; batches hold 32 such snapshots. Optimisation uses Adam ($\text{lr}=10^{-3}$, weight decay $10^{-4}$), gradient clipping at 1.0, 5 warm-up epochs and up to 60 epochs with early stopping (patience 10). Loss is a weighted multitask sum---$1.0$ on the 24-hour head, $0.3$ on the 2/3-day heads, $0.5$ on onset, $0.2$ on the regression heads---with focal weighting ($\alpha{=}0.75$, $\gamma{=}2$) scaled by per-label confidence to handle the 2\% positive rate. Normalisation statistics are fitted on the training block only; calibration (temperature or isotonic/PAVA) and the decision threshold are fitted on validation only.
 
-\subsection{Baseline Results}
-\label{sec:baseline-results}
+\textbf{Hyperparameter tuning} searches GRU hidden $\in\{64,128,256\}$, layers $\in\{1,2\}$, dropout $\in\{0.1,0.2,0.3\}$, lr $\in\{10^{-4},3\!\times\!10^{-4},10^{-3}\}$ and lookback $\in\{7,14,30\}$\,days, selecting on \emph{validation episode-level} PR-AUC. Episode-level rather than node-day selection is essential: the 2018--2020 validation block is hydrologically quiet (0.810\% positive versus 2.276\% in test), which makes node-day PR-AUC a noisy and biased model-selection signal.
 
-Table~\ref{tab:baselines} reports the measured baselines. Two observations drive the entire study.
+\subsection{Baseline Experimental Results}
+\label{sec:baseline}
 
 \begin{table}[t]
-\caption{Baseline results, temporal protocol, test block (2021+). \textsc{ev.det} is the fraction of the 1,469 episodes for which an alarm was raised in the seven days \emph{strictly before} onset.}
+\caption{Baselines, temporal protocol, test block (2021+). \textsc{ev.det}: fraction of the 1,469 episodes alarmed in the 7 days \emph{before} onset.}
 \label{tab:baselines}
-\footnotesize
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{lrrrrrrr}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrr}
 \toprule
-Baseline & PR-AUC & Brier & ECE & POD & FAR & CSI & ev.det \\
+Baseline & PR-AUC & Brier & ECE & POD & FAR & ev.det \\
 \midrule
-Persistence      & 0.5904 & 0.00946 & 0.0105 & 0.769 & 0.231 & 0.624 & 0.223 \\
-Climatology      & 0.1083 & 0.02090 & 0.0033 & 0.556 & 0.882 & 0.107 & 0.515 \\
-Discharge pctl.  & 0.8164 & 0.00840 & 0.0037 & 0.769 & 0.231 & 0.625 & 0.223 \\
-GBT (LightGBM)   & \textbf{0.8496} & \textbf{0.00755} & 0.0032 & 0.634 & \textbf{0.080} & 0.601 & 0.161 \\
-STGCN            & 0.6633 & 0.01346 & 0.0070 & 0.474 & 0.301 & 0.394 & --- \\
+\multicolumn{7}{l}{\emph{Deep}} \\
+M0 GRU (ours)   & 0.5981 & 0.01373 & 0.0044 & 0.540 & 0.441 & 0.262 \\
+STGCN~\cite{STGCN2018} & 0.6633 & 0.01346 & 0.0070 & 0.474 & 0.301 & --- \\
+\midrule
+\multicolumn{7}{l}{\emph{Non-neural reference}} \\
+Persistence     & 0.5904 & 0.00946 & 0.0105 & 0.769 & 0.231 & 0.223 \\
+Climatology     & 0.1083 & 0.02090 & 0.0033 & 0.556 & 0.882 & 0.515 \\
+Discharge pctl. & 0.8164 & 0.00840 & 0.0037 & 0.769 & 0.231 & 0.223 \\
+LightGBM        & \textbf{0.8496} & \textbf{0.00755} & 0.0032 & 0.634 & \textbf{0.080} & 0.161 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-First, \textbf{the ranking task is close to saturated by autocorrelation}. The discharge-percentile rule---a lookup on today's discharge, with no learning---reaches 0.8164 PR-AUC. Because the target is tomorrow's discharge exceeding a per-node percentile and discharge is strongly autocorrelated day to day, the majority of positive node-days are continuations of an ongoing flood rather than onsets. PR-AUC therefore has little headroom above a trivial rule, and the GBT's 0.8496 is a demanding bar that is largely a measure of how well a model reproduces persistence.
-
-Second, \textbf{the operationally meaningful task is far from saturated}. The best baseline warns before onset on only 22.3\% of episodes, and the strongest ranker (GBT) on 16.1\%. Climatology's apparently high 0.515 is an artefact of alarming almost constantly (FAR $=0.882$) and is not skill. This gap---between ranking flood-days and warning before floods begin---is the target of the proposed contribution, and we accordingly report \textsc{ev.det} at a comparable FAR as the primary criterion, with PR-AUC secondary.
-
-Persistence and the discharge-percentile rule share identical POD/FAR/CSI by construction: after isotonic calibration the validation-selected threshold lands at the 98th percentile, which is exactly the flood-state definition.
+Table~\ref{tab:baselines} establishes the two facts that scope the project. First, \textbf{the ranking task is near-saturated by autocorrelation}: a lookup on today's discharge percentile, with no learning, reaches 0.8164 PR-AUC, because most positive node-days are continuations of an ongoing flood rather than onsets. PR-AUC therefore has little headroom above a trivial rule, and no purely temporal network can be expected to close it. Second, \textbf{the operational task is far from saturated}: the strongest ranker warns before onset on only 16.1\% of episodes, and the best any baseline achieves is 22.3\%. (Climatology's 0.515 is an artefact of alarming almost constantly, FAR $=0.882$, and is not skill.) We therefore adopt \textsc{ev.det} at comparable FAR as the primary criterion and PR-AUC as secondary; ROC-AUC saturates at 0.98--0.99 across all configurations and is uninformative here.
 
 \section{Proposed Contribution}
 
-\subsection{Novelty}
+\subsection{Expected Novelty}
+\label{sec:novelty}
 
-\begin{enumerate}
-\item \textbf{Multi-relational topology-aware graph.} Directed flow edges (35) held separate from spatial edges (204) in a relational GATv2~\cite{GATv2} with per-relation parameters; flow edges are never symmetrised. Edge attributes carry elevation drop and distance. Addresses RQ1.
+\textbf{Architecture---novel attention mechanism (primary).} A \emph{flow-lagged relational attention} layer. In standard spatiotemporal GNNs a node attends to its neighbours' representations on the \emph{same} day. For river networks this is physically wrong: water requires hours to days to propagate downstream, so zero-lag message passing attends to the correct neighbours at the wrong time. We attach to each directed flow edge a travel-time offset $\tau_{uv}$---derived from channel distance and elevation drop, or learned per edge with a differentiable soft-gather over the temporal axis---so that node $v$ attends to $u$'s state at $t-\tau_{uv}$. Spatial edges remain at zero lag. To our knowledge, lag-parameterised attention over a directed hydrological graph has not been reported.
 
-\item \textbf{Leakage control as a shipped data artifact.} Three precomputed evaluation protocols prevent leakage by design, and a dedicated experiment quantifies the inflation caused by random splitting on an identical architecture. This is the methodological contribution and, empirically, the strongest result (Section~\ref{sec:leakage}).
+\textbf{Architecture---novel fusion strategy.} FiLM~\cite{FiLM2018} conditioning in which static terrain descriptors generate per-channel affine modulations of the temporal representation, rather than being concatenated as extra inputs. Initialised to identity so the model begins at the M0 baseline. Already validated (Section~\ref{sec:improve}).
 
-\item \textbf{Calibrated probabilistic output.} Temperature~\cite{Guo2017} and isotonic scaling fit on the validation block only; Brier score with Murphy decomposition, ECE (15 bins), and reliability diagrams reported. Deep ensemble~\cite{Lakshminarayanan2017} (5 seeds) for uncertainty.
+\textbf{Representation---novel graph representation.} A multi-relational graph in which directed flow, distance-decayed spatial proximity, and self-loops are separate relations with independent GATv2~\cite{GATv2} parameters, and flow edges are never symmetrised---as they are in most published flood GNNs.
 
-\item \textbf{Zero-cost multimodal alignment.} Sentinel-1 SAR frames auto-labelled via a shared temporal--spatial key with no manual annotation. Frames are attached causally, to the first panel day at or after acquisition.
-\end{enumerate}
+\textbf{Learning---novel training strategy.} An \emph{onset-weighted} objective. Because $\sim$80\% of positive node-days are flood continuations, the gradient is dominated by examples a persistence rule already solves. We weight each positive by its recency to episode onset, concentrating capacity on the transition the warning system actually needs.
 
-\subsection{Hypotheses}
+\textbf{Efficiency---inference cost.} Calibration currently relies on a 5-seed deep ensemble~\cite{Lakshminarayanan2017}, a $5\times$ inference cost incompatible with the constraint of Section~1. We will distil the ensemble into a single network and test whether calibration quality survives.
 
-We hypothesised that (H1) the flow-edge GNN (M3) would exceed the spatial-only GNN (M2) in test PR-AUC, particularly at downstream nodes; (H2) calibration would reduce ECE relative to the uncalibrated model; and (H3) SAR fusion would improve detection at imaged nodes. Section~\ref{sec:results} reports that H2 is supported and H1 and H3 are not.
+\subsection{Expected Improvement}
+\label{sec:improve}
+
+\begin{table}[t]
+\caption{Preliminary ablation, temporal protocol, test block. Each step adds one component to M0. M5--M6 are 5-seed ensembles.}
+\label{tab:ladder}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+Model & PR-AUC & Brier & ECE & POD & FAR & ev.det \\
+\midrule
+M0 GRU only     & 0.5981 & 0.01373 & \textbf{0.0044} & 0.540 & 0.441 & 0.262 \\
+M1 $+$FiLM      & 0.7031 & 0.01205 & 0.0059 & 0.579 & 0.310 & 0.324 \\
+M2 $+$spatial   & 0.7148 & 0.01129 & 0.0065 & 0.621 & 0.315 & \textbf{0.408} \\
+M3 $+$flow      & 0.7039 & 0.01351 & 0.0103 & 0.621 & 0.342 & 0.380 \\
+M4 focal loss   & 0.7093 & 0.02290 & 0.0756 & 0.634 & 0.336 & 0.330 \\
+M5 ens.$+$temp. & \textbf{0.7421} & \textbf{0.01188} & 0.0088 & 0.632 & \textbf{0.282} & 0.344 \\
+M6 SAR CNN      & 0.7256 & 0.01538 & 0.0167 & \textbf{0.664} & 0.338 & 0.366 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{Identical network (M3) and hyperparameters; only the split changes. The leaky protocol wins on every pointwise metric and loses fourfold on pre-onset warning.}
+\label{tab:protocol}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+Protocol & PR-AUC & Brier & ECE & POD & ev.det \\
+\midrule
+Temporal (correct) & 0.7039 & 0.01351 & 0.0103 & 0.621 & \textbf{0.380} \\
+Basin holdout      & 0.8399 & 0.00781 & 0.0062 & 0.498 & 0.217 \\
+Random (leaky)     & \textbf{0.9050} & \textbf{0.00513} & \textbf{0.0025} & \textbf{0.753} & 0.089 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Already confirmed.} Table~\ref{tab:ladder} validates the fusion contribution: FiLM terrain conditioning (M0$\to$M1) yields $+0.105$ PR-AUC and $+0.062$ \textsc{ev.det}, the largest single step in the ladder. Calibration behaves as designed---focal loss alone drives ECE to 0.0756, and ensembling with temperature scaling~\cite{Guo2017} restores it to 0.0088 while adding $+0.033$ PR-AUC. Against STGCN, M5 gains $+0.079$ PR-AUC at \emph{lower} FAR, and every configuration from M1 onward exceeds every baseline on \textsc{ev.det} (Section~\ref{sec:baseline}) by up to $1.8\times$.
+
+\textbf{Evidence motivating the attention contribution.} Adding directed flow edges at zero lag (M2$\to$M3) \emph{degrades} every test metric. We read this not as evidence that topology is uninformative but as a mechanism failure: attention over a 35-edge flow relation cannot help when it samples upstream state at a physically impossible instant. This is the hypothesis the lagged mechanism tests, and the null gives it a controlled comparison point. SAR fusion likewise falls within seed noise, expected with imagery at 9 of 51 nodes. M0--M4 are single-seed, so the M2--M3 gap is not yet statistically resolvable; a 5-seed re-run is the immediate next experiment.
+
+\textbf{Expected gains.} We target \textsc{ev.det} $>0.50$ at FAR $\le 0.25$ from lagged attention plus onset weighting (versus 0.408 at FAR 0.315 now), ECE $<0.02$ from a single distilled network, and $5\times$ lower inference cost than the current ensemble.
+
+Table~\ref{tab:protocol} shows why this evaluation discipline matters: a random split raises PR-AUC from 0.704 to 0.905 while pre-onset detection \emph{collapses} from 0.380 to 0.089. Leakage does not merely inflate a score---it inverts model selection, so tuning on a random split systematically prefers networks that recognise floods already underway and warn nobody.
 
 \section{Experimental Plan}
 
-\subsection{Evaluation Metrics}
-\label{sec:metrics}
+\textbf{Evaluation metrics.} \emph{Ranking:} PR-AUC (primary), ROC-AUC (comparability only). \emph{Calibration:} Brier with Murphy decomposition, ECE (15 bins), reliability diagrams. \emph{Operational:} POD, FAR, CSI at validation-selected thresholds. \emph{Episode-level:} \textsc{ev.det}, the proportion of the 1,469 episodes alarmed at least once in the 7 days strictly before onset, plus mean lead time; an episode detected once counts once, which is what an operator experiences. \emph{Efficiency:} parameters, per-epoch time, inference latency.
 
-\textbf{Ranking:} PR-AUC (primary for class imbalance), ROC-AUC (reported for comparability; it is uninformative here, saturating at 0.98--0.99 across all configurations). \textbf{Calibration:} Brier score with Murphy decomposition, ECE, reliability diagrams. \textbf{Operational:} POD, FAR, CSI at validation-selected thresholds. \textbf{Episode-level:} \textsc{ev.det}, the proportion of the 1,469 documented episodes for which the model exceeded the threshold at least once in the seven days strictly before onset, and the mean lead time over detected episodes. An episode detected once counts once, which is what an operator experiences; this is deliberately \emph{not} node-day recall, which can look strong while every warning arrives too late.
+\textbf{Ablations} isolate each contribution: lag ($0$ / distance-derived $\tau$ / learned $\tau$), fusion (none / concat / FiLM), relation set (none / spatial / flow / both), loss (BCE / focal / onset-weighted), calibration (raw / temperature / ensemble / distilled).
 
-Model selection uses episode-level PR-AUC on validation rather than node-day PR-AUC, because the hydrologically quiet 2018--2020 validation block (0.810\% positive) makes the latter a noisy selection signal.
+\textbf{Baselines.} Deep: per-node GRU (M0), per-node LSTM, STGCN, and a zero-lag relational GATv2 (the direct ablation of the proposed mechanism). Non-neural reference: persistence, per-node climatology, discharge-percentile rule, LightGBM.
 
-\subsection{Ablation Ladder}
-
-Each step changes exactly one component: M0 (GRU only, self-loops), M1 ($+$FiLM terrain conditioning), M2 ($+$spatial edges), M3 ($+$directed flow edges), M4 (focal $\times$ label-confidence loss), M5 (5-seed deep ensemble $+$ temperature scaling), M6 (SAR as scalars, then as a ResNet-18 CNN branch).
-
-\subsection{Resource Requirements}
-
-Parameter counts: 294,727 (M0), 312,263 (M1), 581,319 (M2--M5), 583,623 (M6-scalars), 11,800,199 (M6-CNN). The complete experimental suite---four baselines, the M0--M6 ladder, and two alternative protocols---executed in \textbf{5.07 hours on a single Tesla T4} (Kaggle free tier). Per-epoch cost: 4.2\,s (M0), 13.5\,s (M2--M5), 94\,s (M6-CNN). Storage: $\sim$40\,MB tabular, $\sim$1.4\,GB imagery. Zero monetary cost.
-
-\section{Results}
-\label{sec:results}
-
-\subsection{Ablation Ladder}
-
-\begin{table}[t]
-\caption{Ablation ladder, temporal protocol, test block. Best per column in bold. M5 and M6 are 5-seed ensembles; M0--M4 are single-seed (see Section~\ref{sec:limitations}).}
-\label{tab:ladder}
-\footnotesize
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{lrrrrrrr}
-\toprule
-Model & PR-AUC & Brier & ECE & POD & FAR & CSI & ev.det \\
-\midrule
-M0 GRU only     & 0.5981 & 0.01373 & \textbf{0.0044} & 0.540 & 0.441 & 0.379 & 0.262 \\
-M1 $+$FiLM      & 0.7031 & 0.01205 & 0.0059 & 0.579 & 0.310 & 0.459 & 0.324 \\
-M2 $+$spatial   & 0.7148 & 0.01129 & 0.0065 & 0.621 & 0.315 & 0.483 & \textbf{0.408} \\
-M3 $+$flow      & 0.7039 & 0.01351 & 0.0103 & 0.621 & 0.342 & 0.469 & 0.380 \\
-M4 focal        & 0.7093 & 0.02290 & 0.0756 & 0.634 & 0.336 & 0.480 & 0.330 \\
-M5 ens.$+$temp. & \textbf{0.7421} & \textbf{0.01188} & 0.0088 & 0.632 & \textbf{0.282} & \textbf{0.506} & 0.344 \\
-M6 SAR scalars  & 0.7321 & 0.01187 & 0.0085 & 0.600 & 0.279 & 0.487 & 0.324 \\
-M6 SAR CNN      & 0.7256 & 0.01538 & 0.0167 & \textbf{0.664} & 0.338 & 0.496 & 0.366 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Table~\ref{tab:ladder} reports the ladder. \textbf{No neural configuration beats the GBT on PR-AUC} (best 0.7421 vs.\ 0.8496), for the reason established in Section~\ref{sec:baseline-results}. \textbf{Every configuration from M1 onward beats every baseline on \textsc{ev.det}}: M2 warns before onset on 40.8\% of episodes against 22.3\% for the best baseline and 16.1\% for the GBT, at a comparable-to-slightly-higher false-alarm ratio. Against the published STGCN architecture, M5 improves PR-AUC by $+0.079$ (0.7421 vs.\ 0.6633) and CSI by $+0.112$ at a \emph{lower} FAR.
-
-\textbf{RQ4 (terrain conditioning) is the largest architectural gain.} FiLM~\cite{FiLM2018} modulation of the temporal representation by static terrain descriptors (M0$\to$M1) yields $+0.105$ PR-AUC and $+0.062$ \textsc{ev.det}, exceeding every other single step.
-
-\textbf{RQ1 (directed flow edges) is a null result.} M2$\to$M3 declines on every test metric (PR-AUC $-0.011$, \textsc{ev.det} $-0.029$, ECE worse), while the validation signal moved in the opposite direction (episode PR-AUC 0.272 vs.\ 0.296). At one seed per configuration neither direction is supportable. H1 is not confirmed.
-
-\textbf{RQ3 (calibration) is confirmed.} The focal $\times$ label-confidence loss (M4) is a net negative in isolation: it barely moves ranking and drives ECE to 0.0756. The 5-seed ensemble with temperature scaling (M5) repairs this, reducing ECE from 0.0727 uncalibrated to 0.0088 and adding $+0.033$ PR-AUC over M4. H2 is supported.
-
-\textbf{RQ5 (SAR fusion) is a null result.} Both variants fall within seed noise of the SAR-free M5 (mean validation episode PR-AUC: M5 0.3007, M6-CNN 0.2988, M6-scalars 0.2932). The CNN branch consumes $20\times$ the parameters and $7\times$ the per-epoch time for no measurable gain; its higher POD and \textsc{ev.det} come with proportionally higher FAR, an operating-point shift rather than added skill. This is the expected outcome given imagery at only 9 of 51 nodes and a 12-day Sentinel-1 revisit against a 1-day forecast horizon. H3 is not confirmed.
-
-\subsection{Protocol Sensitivity: Quantifying Leakage}
-\label{sec:leakage}
-
-\begin{table}[t]
-\caption{Identical architecture (M3) and hyperparameters under three evaluation protocols. Only the split changes.}
-\label{tab:protocol}
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lrrrrrr}
-\toprule
-Protocol & PR-AUC & Brier & ECE & POD & FAR & ev.det \\
-\midrule
-Temporal (correct) & 0.7039 & 0.01351 & 0.0103 & 0.621 & 0.342 & \textbf{0.380} \\
-Basin holdout      & 0.8399 & 0.00781 & 0.0062 & 0.498 & 0.081 & 0.217 \\
-Random (leaky)     & \textbf{0.9050} & \textbf{0.00513} & \textbf{0.0025} & \textbf{0.753} & 0.113 & 0.089 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Table~\ref{tab:protocol} is the study's principal finding. Moving from the temporal split to a random split raises PR-AUC from 0.7039 to 0.9050---a 29\% relative inflation---and improves every pointwise metric: Brier falls by 62\%, ECE by 76\%, POD rises by 0.13. On the reported numbers the leaky model is unambiguously superior.
-
-Pre-onset event detection tells the opposite story. It \emph{collapses} from 0.380 to 0.089. The randomly-split model achieves its excellent pointwise scores by memorising days adjacent to training days within the same flood episode; it recognises floods already underway and almost never warns before one begins. It is, operationally, the worse model by a factor of four, and no pointwise metric reveals this.
-
-We therefore argue that reporting PR-AUC inflation understates the problem. Leakage does not merely bias a number---it inverts model selection, and a practitioner tuning against a random split will systematically choose architectures that cannot warn.
-
-The basin-holdout number (0.8399) must not be read as the best result: that protocol still trains on 2003--2025 and therefore retains temporal leakage. It measures spatial transfer to an unseen basin only, and is not comparable to the temporal figure.
-
-\section{Discussion and Limitations}
-\label{sec:limitations}
-
-\textbf{Single-seed comparisons.} M0--M4 are single-seed while M5 and M6 are 5-seed ensembles. M2 currently leads on \textsc{ev.det} (0.408), but that is one seed measured against ensembles, and the M5 seed spread on validation episode PR-AUC (0.294--0.309) is comparable to the M2--M3 gap. The claim that M2 is the best configuration is therefore not yet supported; a 5-seed re-run of M2 and M3 is required and is the immediate next experiment.
-
-\textbf{Threshold matching.} \textsc{ev.det} figures are quoted at validation-selected thresholds, which differ across models (M2 FAR 0.315 vs.\ baseline FAR 0.231). Like-for-like comparison requires re-thresholding from the stored per-node-day predictions at a matched FAR; this does not require retraining.
-
-\textbf{Target formulation.} Because most positive node-days are continuations rather than onsets, PR-AUC on this target largely rewards reproducing persistence. Restricting evaluation to node-days on which the node is not already in flood---predicting \emph{onset} rather than \emph{state}---would remove the autocorrelation shortcut and is expected to separate the graph models from the tree baselines on the headline metric. This is an evaluation change, not a modelling change, and is computable from stored predictions.
-
-\textbf{Statistical power.} With 51 nodes and 16 basins, differences of the magnitude separating M2 and M3 are not resolvable at one seed, and basin-holdout results rest on a single held-out basin.
-
-\subsection{Toward the Next Iteration}
-
-The RQ1 null result admits a mechanistic explanation. The relational GATv2 lets an upstream node influence a downstream node using the upstream state on the \emph{same day}. Hydrologically this is wrong: water requires hours to days to propagate downstream, so zero-lag message passing attends to the correct neighbours at the wrong time. A flow-lagged attention mechanism---in which each directed edge carries a travel-time offset derived from channel distance and elevation drop, or learned per edge, so that a node attends to its upstream neighbour's state $k$ days prior---is the natural next contribution. It is architecturally novel, physically motivated, and converts the present null result into a testable hypothesis. Paired with an onset-weighted training objective that down-weights flood continuation days, it directly targets the pre-onset detection gap identified in Section~\ref{sec:baseline-results}.
-
-\section{Conclusion}
-
-This project constructs a reproducible, leakage-controlled Sri Lankan flood benchmark and evaluates a topology-aware multimodal GNN under three protocols. The full ablation ladder and both alternative protocols were executed in 5.07 hours on a single free-tier GPU, and all results are reproducible from the released configuration.
-
-The headline result is methodological: random splitting of autocorrelated hydrological data inflates PR-AUC by 29\% while reducing pre-onset warning capability by a factor of four, so that the metric used to select models actively selects against the operational objective. Substantively, terrain conditioning is confirmed as the dominant architectural gain, calibration via deep ensembling is confirmed as effective, and directed flow edges and SAR fusion are both reported as null results under the current formulation---the former with an identified mechanism and a concrete path forward. We report the negative results in full, on the view that a benchmark whose failures are documented is more useful than one whose successes are.
+\textbf{Resource requirements.} Parameters range from 294,727 (M0) through 581,319 (graph variants) to 11,800,199 with the SAR CNN. The complete suite---all baselines, the M0--M6 ladder and two alternative protocols---ran in \textbf{5.07\,h on a single Tesla T4} (Kaggle free tier); per-epoch cost is 4.2\,s (M0), 13.5\,s (graph) and 94\,s (SAR CNN). The lagged mechanism adds one gather per flow edge and is expected to leave per-epoch cost within 10\% of M3. Storage: $\sim$40\,MB tabular, $\sim$1.4\,GB imagery. Total monetary cost is zero.
 
 \bibliographystyle{ACM-Reference-Format}
 \begin{thebibliography}{00}
-
-\bibitem{FloodGNN2024}
-Cambridge Environmental Data Science. FloodGNN-GRU: A spatio-temporal graph neural network for flood prediction. 2024.
-
-\bibitem{WaterBalance2026}
-Explicit water balance constraints for trustworthy graph neural network flood forecasting. \textit{MDPI Applied Sciences}, 2026.
-
-\bibitem{Roberts}
-Roberts et al. Cross-validation strategies for data with temporal, spatial, hierarchical or phylogenetic structure. \textit{Ecography}.
-
-\bibitem{SpatialCV}
-Choosing blocks for spatial cross-validation: Lessons from a marine remote sensing case study. \textit{Frontiers in Remote Sensing}.
-
-\bibitem{UncertaintyEnsembles2022}
-Flood uncertainty estimation using deep ensembles. \textit{MDPI Water}, 2022.
-
-\bibitem{ProbabilisticForecasting2020}
-Real-time probabilistic flood forecasting using multiple machine learning methods. \textit{MDPI Water}, 2020.
-
-\bibitem{Survey}
-Intelligent flood forecasting and warning: A survey. \textit{OAE Intelligent Robotics}.
-
-\bibitem{FiLM2018}
-Perez, E., Strub, F., de Vries, H., Dumoulin, V., and Courville, A. FiLM: Visual reasoning with a general conditioning layer. \textit{AAAI}, 2018.
-
-\bibitem{GATv2}
-Brody, S., Alon, U., and Yahav, E. How attentive are graph attention networks? \textit{ICLR}, 2022.
-
-\bibitem{STGCN2018}
-Yu, B., Yin, H., and Zhu, Z. Spatio-temporal graph convolutional networks. \textit{IJCAI}, 2018.
-
-\bibitem{Guo2017}
-Guo, C., Pleiss, G., Sun, Y., and Weinberger, K.Q. On calibration of modern neural networks. \textit{ICML}, 2017.
-
-\bibitem{Lakshminarayanan2017}
-Lakshminarayanan, B., Pritzel, A., and Blundell, C. Simple and scalable predictive uncertainty estimation using deep ensembles. \textit{NeurIPS}, 2017.
-
-\bibitem{Copernicus}
-Copernicus Emergency Management Service. GloFAS: Global river discharge reanalysis.
-
-\bibitem{ERA5}
-ECMWF. ERA5-Land reanalysis. Open-Meteo Archive API.
-
-\bibitem{POWER}
-NASA POWER. Daily point data (MERRA-2/GEOS).
-
-\bibitem{Sentinel1}
-Copernicus Sentinel-1 RTC ($\gamma^0$). Microsoft Planetary Computer.
-
-\bibitem{DEM}
-Copernicus DEM.
-
+\bibitem{STGCN2018} Yu, B., Yin, H., Zhu, Z. Spatio-temporal graph convolutional networks: A deep learning framework for traffic forecasting. \textit{IJCAI}, 2018.
+\bibitem{GATv2} Brody, S., Alon, U., Yahav, E. How attentive are graph attention networks? \textit{ICLR}, 2022.
+\bibitem{FiLM2018} Perez, E., Strub, F., de Vries, H., Dumoulin, V., Courville, A. FiLM: Visual reasoning with a general conditioning layer. \textit{AAAI}, 2018.
+\bibitem{Guo2017} Guo, C., Pleiss, G., Sun, Y., Weinberger, K.Q. On calibration of modern neural networks. \textit{ICML}, 2017.
+\bibitem{Lakshminarayanan2017} Lakshminarayanan, B., Pritzel, A., Blundell, C. Simple and scalable predictive uncertainty estimation using deep ensembles. \textit{NeurIPS}, 2017.
+\bibitem{Hinton2015} Hinton, G., Vinyals, O., Dean, J. Distilling the knowledge in a neural network. \textit{NeurIPS Deep Learning Workshop}, 2015.
+\bibitem{GraphWaveNet} Wu, Z., Pan, S., Long, G., Jiang, J., Zhang, C. Graph WaveNet for deep spatial-temporal graph modeling. \textit{IJCAI}, 2019.
+\bibitem{FloodGNN2024} Cambridge Environmental Data Science. FloodGNN-GRU: A spatio-temporal graph neural network for flood prediction. 2024.
+\bibitem{Roberts} Roberts et al. Cross-validation strategies for data with temporal, spatial, hierarchical or phylogenetic structure. \textit{Ecography}.
+\bibitem{Lin2017} Lin, T.-Y., Goyal, P., Girshick, R., He, K., Doll\'ar, P. Focal loss for dense object detection. \textit{ICCV}, 2017.
+\bibitem{Copernicus} Copernicus Emergency Management Service. GloFAS: Global river discharge reanalysis.
+\bibitem{ERA5} ECMWF. ERA5-Land reanalysis. Open-Meteo Archive API.
+\bibitem{POWER} NASA POWER. Daily point data (MERRA-2/GEOS).
+\bibitem{Sentinel1} Copernicus Sentinel-1 RTC ($\gamma^0$). Microsoft Planetary Computer.
+\bibitem{DEM} Copernicus DEM.
 \end{thebibliography}
 
 \end{document}
