@@ -171,7 +171,7 @@ def run(preset: str = "M3", protocol: Optional[str] = None, root: Optional[str] 
         n_seeds: Optional[int] = None, device_spec: str = "auto",
         max_far: Optional[float] = None, verbose: bool = True,
         sar_root: Optional[str] = None, image_px: Optional[int] = None,
-        batch_size: Optional[int] = None) -> Dict:
+        batch_size: Optional[int] = None, tag: Optional[str] = None) -> Dict:
     p = PRESETS[preset]
     mcfg, tcfg = p.model, p.train
     if protocol:
@@ -267,13 +267,17 @@ def run(preset: str = "M3", protocol: Optional[str] = None, root: Optional[str] 
 
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-        with open(os.path.join(out_dir, f"{preset}_{tcfg.protocol}.json"), "w") as f:
+        # `tag` keeps a variant run from overwriting the canonical one — re-running
+        # a single-seed ladder step as an ensemble must not destroy the n=1 result
+        # it is meant to be compared against.
+        stem = f"{preset}_{tcfg.protocol}" + (f"_{tag}" if tag else "")
+        with open(os.path.join(out_dir, f"{stem}.json"), "w") as f:
             json.dump(results, f, indent=2, default=float)
         np.savez_compressed(
-            os.path.join(out_dir, f"{preset}_{tcfg.protocol}_preds.npz"),
+            os.path.join(out_dir, f"{stem}_preds.npz"),
             test_prob=t_prob, test_y=test_ref["y"], test_day=test_ref["day"],
             test_node=test_ref["node"], test_event=test_ref["event"])
-        print(f"[run] wrote {out_dir}/{preset}_{tcfg.protocol}.json")
+        print(f"[run] wrote {out_dir}/{stem}.json")
     return results
 
 

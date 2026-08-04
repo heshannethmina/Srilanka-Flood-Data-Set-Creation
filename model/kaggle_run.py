@@ -104,15 +104,23 @@ def stage_baselines(root: str) -> Dict:
     return {"baselines_temporal": run_baselines("temporal", root, out_dir=RUNS)}
 
 
-def stage_ladder(root: str, epochs: int, seeds: Optional[int]) -> Dict:
+def stage_ladder(root: str, epochs: int, presets: List[str],
+                 seeds: Optional[int]) -> Dict:
+    """Run the ladder steps in `presets`.
+
+    `seeds` overrides the seed count for every step; left as None each preset
+    uses the count its own config declares (1 for M0-M4, 5 for M5). Overriding
+    it writes under a `_s<N>` suffix so a re-run cannot clobber the canonical
+    result it is meant to be compared against.
+    """
     from tfstgnn.train import run
+    tag = f"s{seeds}" if seeds is not None else None
     out = {}
-    for preset in ("M0", "M1", "M2", "M3", "M4", "M5"):
-        # M5 is the 5-seed ensemble; the rest are single-seed by definition.
-        n = seeds if preset == "M5" else 1
+    for preset in presets:
         try:
             out[preset] = run(preset=preset, protocol="temporal", root=root,
-                              out_dir=RUNS, epochs=epochs, n_seeds=n)
+                              out_dir=RUNS, epochs=epochs, n_seeds=seeds,
+                              tag=tag)
         except Exception:
             # The ladder is the longest stage; losing M5 should not also lose
             # M0-M4, which are already written to disk.
@@ -162,7 +170,13 @@ def summarise() -> None:
             for name, v in d.items():
                 rows.append({"model": v.get("baseline", name), **v["test"]})
         else:
-            rows.append({"model": f"{d['preset']} [{d['protocol']}]", **d["test"]})
+            # Seed count belongs in the label: a 5-seed M2 and a 1-seed M2 are
+            # different models, and comparing them against 5-seed M5/M6 is the
+            # whole point of re-running a step.
+            n = d.get("train_config", {}).get("n_seeds", 1)
+            seeds = f" x{n}" if n and n > 1 else ""
+            rows.append({"model": f"{d['preset']}{seeds} [{d['protocol']}]",
+                         **d["test"]})
 
     if not rows:
         return
@@ -178,8 +192,9 @@ def summarise() -> None:
               f"{r.get('event_detection_rate', float('nan')):7.3f} "
               f"{r.get('mean_lead_days', float('nan')):6.2f}")
     print("=" * 96)
-    print("No model has been trained on real data before this run — treat every "
-          "number above as a first result, not a published one.")
+    print("Judge these on ev.det at a comparable FAR, not on PR-AUC: the target is "
+          "tomorrow's discharge over the 98th percentile and discharge is strongly "
+          "autocorrelated, so discharge_pctl already ranks near the ceiling.")
 
 
 # --------------------------------------------------------------------- main
@@ -192,12 +207,27 @@ def main() -> None:
                          "session at ~9 h, and a killed session saves nothing")
     ap.add_argument("--epochs", type=int, default=60)
     ap.add_argument("--seeds", type=int, default=5,
-                    help="ensemble size for M5/M6 (§7.7 uses 5)")
+                    help="ensemble size for M6 in the sar stage (§7.7 uses 5)")
+    ap.add_argument("--presets", default="M0,M1,M2,M3,M4,M5",
+                    help="which ladder steps to run, comma-separated; narrow it "
+                         "to revisit one step without re-running the whole ladder")
+    ap.add_argument("--ladder-seeds", type=int, default=None,
+                    help="override the seed count for every preset in --presets. "
+                         "Use it to re-run a single-seed step as an ensemble, e.g. "
+                         "--presets M2,M3 --ladder-seeds 5. Results are written "
+                         "under a _s<N> suffix and never overwrite the originals.")
     ap.add_argument("--image-px", type=int, default=256,
                     help="SAR frame size for M6_cnn; 256 quarters the activation "
                          "memory versus 512 and still resolves the channel")
     ap.add_argument("--batch-size", type=int, default=8, help="M6_cnn only")
     a = ap.parse_args()
+
+    from tfstgnn.config import PRESETS
+    presets = [p.strip() for p in a.presets.split(",") if p.strip()]
+    unknown = [p for p in presets if p not in PRESETS]
+    if unknown:
+        sys.exit(f"[fatal] unknown preset(s) {unknown}; "
+                 f"choose from {list(PRESETS)}")
 
     require_kaggle()
     report_env()
@@ -235,7 +265,7 @@ def main() -> None:
             if name == "baselines":
                 stage_baselines(root)
             elif name == "ladder":
-                stage_ladder(root, a.epochs, a.seeds)
+                stage_ladder(root, a.epochs, presets, a.ladder_seeds)
             elif name == "leakage":
                 stage_leakage(root, a.epochs)
             elif name == "spatial":

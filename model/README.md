@@ -68,9 +68,25 @@ flight.
 | `all` | all of the above, in order | — | likely over one session |
 
 Useful flags: `--time-budget-hours` (default 8), `--epochs` (default 60, early
-stopping usually fires sooner), `--seeds` (ensemble size, default 5),
+stopping usually fires sooner), `--seeds` (M6 ensemble size, default 5),
 `--image-px` (256 by default; 512 is the native frame size but quadruples
 activation memory), `--batch-size` (M6_cnn only).
+
+### Revisiting one ladder step
+
+`--presets` narrows the ladder and `--ladder-seeds` overrides the seed count for
+whatever it selects, so a single step can be re-run as an ensemble without
+repeating the other five:
+
+```python
+!python /kaggle/working/repo/model/kaggle_run.py \
+    --stage ladder --presets M2,M3 --ladder-seeds 5
+```
+
+Overridden runs are written under a `_s<N>` suffix — `M2_temporal_s5.json`
+alongside `M2_temporal.json` — because the point of the re-run is to compare
+against the original, and overwriting it would destroy the comparison. The
+summary table labels them `M2 x5` so the two are never confused.
 
 ## Output
 
@@ -112,7 +128,14 @@ torch scatter ops.
 
 ## Status
 
-The code is validated end to end against a synthetic panel with the real schema
-— every preset, both vision modes, all three protocols, all four baselines.
-**No model has been trained on the real data yet.** This directory contains no
-results and none should be quoted from it.
+First full run on the real data: 2026-08-02, Kaggle T4, 5.07 h, all five stages,
+none skipped or failed. Headline: no model beats the gradient-boosted-tree
+baseline on PR-AUC (best 0.742 vs 0.850), but every model from M1 up beats every
+baseline on pre-onset event detection, which is the metric §7.8 pre-registers as
+the one that matters.
+
+Two caveats attach to those numbers. **M2 leads on event detection (0.408) but is
+a single seed**, while M5 and M6 are 5-seed ensembles — that comparison is not yet
+fair, and `--presets M2,M3 --ladder-seeds 5` is the run that fixes it. **RQ1
+(directed flow edges) remains unresolved**: M2→M3 falls on every test metric but
+rises on validation, at n=1 each.
