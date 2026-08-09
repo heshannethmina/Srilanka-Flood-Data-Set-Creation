@@ -106,27 +106,38 @@ python scripts/loaders/image_loader.py         # pair chips with tabular feature
 ```
 Full details: [docs/IMAGE_DATASET.md](docs/IMAGE_DATASET.md).
 
-## The model — TF-STGNN
+## The models
 
-Dataset creation ([`scripts/`](scripts/)) and model creation ([`model/`](model/))
-are kept in separate directories with no shared entry point.
+Dataset creation ([`scripts/`](scripts/)) and model creation
+([`models/`](models/)) are kept in separate directories with no shared entry
+point. Two model families are built and compared:
 
-The baseline architecture from the proposal (§7.7) lives in
-[`model/tfstgnn/`](model/tfstgnn/): a GRU temporal encoder with FiLM terrain
-conditioning, an optional Sentinel-1 CNN branch, and a relational GATv2 that
-keeps directed flow edges separate from spatial ones — no PyTorch Geometric
-required.
+- **Model 1 — TF-STGNN** ([`models/model1/`](models/model1/)), the architecture
+  from the proposal §7.7: a GRU temporal encoder with FiLM terrain conditioning,
+  an optional Sentinel-1 CNN branch, and a relational GATv2 that keeps directed
+  flow edges separate from spatial ones — no PyTorch Geometric required.
+- **Model 2 — MMF-Net** ([`models/model2/`](models/model2/)), graph-free by
+  design: periodic per-feature numerical embeddings feeding a transformer over
+  the lookback window, cross-feature attention, and a pretrained SAR encoder
+  fused through a learned gate. Built because model 1 loses to a
+  gradient-boosted-tree baseline on PR-AUC (0.742 vs 0.850), which is the known
+  failure of neural networks on tabular data and has a known fix.
+
+Both import [`models/floodlib/`](models/floodlib/) for the data, the loss, the
+metrics and the training loop, so a difference between them is a difference of
+architecture and not of evaluation protocol.
 
 It runs on Kaggle. Attach both published datasets to a GPU notebook, then:
 
 ```python
 !git clone -q https://github.com/heshannethmina/Srilanka-Flood-Data-Set-Creation /kaggle/working/repo
-!python /kaggle/working/repo/model/kaggle_run.py --stage baselines
-!python /kaggle/working/repo/model/kaggle_run.py --stage ladder
+!python /kaggle/working/repo/models/kaggle_run.py --stage baselines
+!python /kaggle/working/repo/models/kaggle_run.py --stage ladder2
 ```
 
-Stages: `baselines` · `ladder` (M0→M5) · `leakage` (RQ2) · `spatial` · `sar`
-(RQ5). See [model/README.md](model/README.md) for the runbook and
+Stages: `baselines` · `ladder2` (N0→N5) · `sar_pretrain` · `ladder` (M0→M5) ·
+`leakage` (RQ2) · `spatial` · `sar2` · `sar` (RQ5). See
+[models/README.md](models/README.md) for the runbook and
 [docs/MODEL.md](docs/MODEL.md) for the design rationale.
 
 ## Use it in PyTorch

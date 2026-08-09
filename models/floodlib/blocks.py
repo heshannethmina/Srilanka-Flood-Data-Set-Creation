@@ -1,9 +1,10 @@
-"""Neural building blocks (PROJECT_PROPOSAL.md §7.7).
+"""Neural building blocks used by more than one model family.
 
-The relational GATv2 is written directly against torch scatter primitives. With
-51 nodes and 239 edges, PyTorch Geometric would add a heavyweight, hard-to-build
-dependency for no speed benefit — and this way the exact same file runs on
-Windows/Python 3.13 locally and on Kaggle unmodified.
+Anything architecture-defining lives in the model package that defines it — the
+relational GATv2 in `model1`, the tokenising transformer in `model2`. What is
+here is shared machinery, so that a difference between the two families is a
+difference of architecture and never an accident of two slightly different
+implementations of the same layer.
 """
 from __future__ import annotations
 
@@ -13,10 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .graph import N_RELATIONS
 
-
-# ------------------------------------------------------- stream 1: temporal
+# ------------------------------------------------------------ temporal (GRU)
 
 class TemporalEncoder(nn.Module):
     """2-layer GRU over the lookback window + learned attention pooling.
@@ -48,13 +47,14 @@ class TemporalEncoder(nn.Module):
         return self.drop((h * a.unsqueeze(-1)).sum(1)), a
 
 
-# --------------------------------------------------------- stream 2: terrain
+# ------------------------------------------------------------------- terrain
 
 class FiLM(nn.Module):
     """Static terrain modulates the temporal state: h ← γ ⊙ h + β, then LayerNorm.
 
     γ is parameterised as 1 + Δγ so the module starts at identity, which keeps
-    M1 a strict superset of M0 at initialisation.
+    the conditioned model a strict superset of the unconditioned one at
+    initialisation.
     """
 
     def __init__(self, n_static: int, hidden: int, feat: int):
@@ -71,7 +71,7 @@ class FiLM(nn.Module):
         return self.norm(h * (1.0 + gamma.unsqueeze(0)) + beta.unsqueeze(0))
 
 
-# ---------------------------------------------------------- stream 3: vision
+# -------------------------------------------------------------------- vision
 
 class BasicBlock(nn.Module):
     def __init__(self, cin: int, cout: int, stride: int = 1):
@@ -95,7 +95,8 @@ class SarCNN(nn.Module):
 
     Pretrained ImageNet weights are deliberately not used: SAR backscatter in dB
     has nothing in common with RGB natural-image statistics, and the 2-channel
-    stem would have to be re-initialised anyway.
+    stem would have to be re-initialised anyway. `model2` instead pretrains this
+    same encoder on the labelled flood/dry chips — see `model2/pretrain_sar.py`.
     """
 
     def __init__(self, in_ch: int = 2, out_dim: int = 64, width: int = 64):
@@ -108,6 +109,22 @@ class SarCNN(nn.Module):
                (2 * w, 4 * w, 2), (4 * w, 4 * w, 1), (4 * w, 8 * w, 2), (8 * w, 8 * w, 1)]
         self.blocks = nn.Sequential(*[BasicBlock(a, b, s) for a, b, s in cfg])
         self.head = nn.Linear(8 * w, out_dim)
+        self.frozen_bn = False
+
+    def train(self, mode: bool = True):
+        """Keep BatchNorm in eval mode when the encoder is frozen.
+
+        Freezing the weights is not enough on its own: BatchNorm would still
+        update its running statistics on every forward pass, so a "frozen"
+        feature extractor would quietly drift away from the representation it
+        was pretrained to produce.
+        """
+        super().train(mode)
+        if self.frozen_bn:
+            for m in self.modules():
+                if isinstance(m, nn.BatchNorm2d):
+                    m.eval()
+        return self
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: [M, 2, H, W] → [M, out_dim]."""
@@ -115,69 +132,26 @@ class SarCNN(nn.Module):
         return self.head(F.adaptive_avg_pool2d(z, 1).flatten(1))
 
 
-# ----------------------------------------------------------- stream 4: graph
+def load_pretrained_encoder(cnn: SarCNN, path: str, freeze: bool = True,
+                            verbose: bool = True) -> SarCNN:
+    """Load `pretrain_sar.py` weights into a `SarCNN`, tolerating a head mismatch.
 
-def _scatter_softmax(logits: torch.Tensor, index: torch.Tensor, n: int) -> torch.Tensor:
-    """Softmax over edges sharing a destination node. logits: [E, H]."""
-    idx = index.unsqueeze(-1).expand_as(logits)
-    m = torch.zeros(n, logits.size(-1), device=logits.device, dtype=logits.dtype)
-    m = m.index_reduce(0, index, logits, "amax", include_self=False)
-    ex = torch.exp(logits - m.gather(0, idx))
-    den = torch.zeros_like(m).index_add(0, index, ex)
-    return ex / (den.gather(0, idx) + 1e-16)
-
-
-class RelationalGATv2(nn.Module):
-    """GATv2 with **separate parameters per relation** (flow / spatial / self).
-
-    Attention is normalised jointly across a node's incoming edges regardless of
-    relation, so the layer learns how much to weight its upstream parent against
-    its spatial neighbours rather than having that ratio fixed by architecture.
+    The pretraining task has a 2-way classifier on top; the projection head that
+    feeds the fusion layer is a different shape, so only stem+blocks transfer.
     """
-
-    def __init__(self, dim_in: int, heads: int = 4, head_dim: int = 32,
-                 edge_dim: int = 4, dropout: float = 0.2,
-                 n_relations: int = N_RELATIONS):
-        super().__init__()
-        self.h, self.d, self.R = heads, head_dim, n_relations
-        out = heads * head_dim
-        self.lin_src = nn.ModuleList(nn.Linear(dim_in, out) for _ in range(n_relations))
-        self.lin_dst = nn.ModuleList(nn.Linear(dim_in, out) for _ in range(n_relations))
-        self.lin_edge = nn.ModuleList(nn.Linear(edge_dim, out) for _ in range(n_relations))
-        self.att = nn.ParameterList(
-            nn.Parameter(torch.empty(heads, head_dim)) for _ in range(n_relations))
-        for a in self.att:
-            nn.init.xavier_uniform_(a)
-        self.proj = nn.Linear(out, dim_in)
-        self.norm = nn.LayerNorm(dim_in)
-        self.drop = nn.Dropout(dropout)
-
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor,
-                edge_attr: torch.Tensor, edge_rel: torch.Tensor) -> torch.Tensor:
-        """x: [B, N, D] → [B, N, D] (residual + LayerNorm)."""
-        B, N, _ = x.shape
-        E = edge_index.size(1)
-        if E == 0:
-            return self.norm(x)
-        src, dst = edge_index[0], edge_index[1]
-
-        logits = x.new_zeros(B, E, self.h)
-        msg = x.new_zeros(B, E, self.h, self.d)
-        for r in range(self.R):
-            sel = edge_rel == r
-            if not bool(sel.any()):
-                continue
-            s_r, d_r = src[sel], dst[sel]
-            a_r = edge_attr[sel]
-            m = self.lin_src[r](x)[:, s_r]                       # [B, E_r, out]
-            g = self.lin_dst[r](x)[:, d_r] + self.lin_edge[r](a_r).unsqueeze(0)
-            pre = F.leaky_relu(m + g, 0.2).view(B, -1, self.h, self.d)
-            logits[:, sel] = (pre * self.att[r]).sum(-1)
-            msg[:, sel] = m.view(B, -1, self.h, self.d)
-
-        alpha = torch.stack([_scatter_softmax(logits[b], dst, N) for b in range(B)])
-        alpha = self.drop(alpha)                                  # [B, E, H]
-
-        agg = x.new_zeros(B, N, self.h, self.d)
-        agg.index_add_(1, dst, msg * alpha.unsqueeze(-1))
-        return self.norm(x + self.drop(self.proj(agg.reshape(B, N, self.h * self.d))))
+    state = torch.load(path, map_location="cpu")
+    state = state.get("encoder", state)
+    keep = {k: v for k, v in state.items()
+            if k in cnn.state_dict() and cnn.state_dict()[k].shape == v.shape}
+    missing = [k for k in cnn.state_dict() if k not in keep]
+    cnn.load_state_dict(keep, strict=False)
+    if freeze:
+        for name, p in cnn.named_parameters():
+            p.requires_grad = name.startswith("head")
+        cnn.frozen_bn = True
+        cnn.eval()
+    if verbose:
+        print(f"[sar-pretrain] loaded {len(keep)}/{len(cnn.state_dict())} tensors "
+              f"from {path} (not loaded: {len(missing)}) | "
+              f"{'frozen' if freeze else 'fine-tuning'}")
+    return cnn

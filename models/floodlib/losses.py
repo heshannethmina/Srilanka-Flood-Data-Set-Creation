@@ -6,7 +6,7 @@ from typing import Dict, List
 import torch
 import torch.nn.functional as F
 
-from .config import TrainConfig
+from .traincfg import TrainConfig
 
 
 def focal_bce(logits: torch.Tensor, target: torch.Tensor,

@@ -4,7 +4,7 @@ pandas>=1.5
 numpy>=1.23
 pyarrow>=10.0
 
-# Model — src/tfstgnn (see docs/MODEL.md). Deliberately no torch-geometric:
+# Model — models/ (see docs/MODEL.md). Deliberately no torch-geometric:
 # the relational GATv2 is implemented directly on torch scatter ops.
 # torch>=2.0
 # lightgbm>=4.0     # baseline 4 (falls back to scikit-learn if absent)

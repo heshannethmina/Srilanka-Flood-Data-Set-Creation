@@ -1,4 +1,4 @@
-"""TF-STGNN — the assembled network (PROJECT_PROPOSAL.md §7.7)."""
+"""TF-STGNN — model 1, the assembled network (PROJECT_PROPOSAL.md §7.7)."""
 from __future__ import annotations
 
 from typing import Dict, Optional
@@ -6,9 +6,11 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 
+from floodlib.blocks import FiLM, SarCNN, TemporalEncoder
+from floodlib.graph import Graph
+
 from .config import ModelConfig
-from .graph import Graph
-from .modules import FiLM, RelationalGATv2, SarCNN, TemporalEncoder
+from .modules import RelationalGATv2
 
 
 class TFSTGNN(nn.Module):

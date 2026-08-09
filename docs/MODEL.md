@@ -3,28 +3,33 @@
 Implementation of the model specified in [PROJECT_PROPOSAL.md](PROJECT_PROPOSAL.md)
 §7.7, plus the six baselines of §7.8 and the incremental M0 → M6 ladder of §8.
 
-Code lives in [model/](../model/) — deliberately separate from
+This document describes **model 1**. A second family, **model 2 (MMF-Net)**, is a
+graph-free multimodal transformer built to answer what model 1's results left
+open — see the module map at the end and
+[models/README.md](../models/README.md) for the comparison.
+
+Code lives in [models/](../models/) — deliberately separate from
 [scripts/](../scripts/), which creates the datasets. The two have no shared entry
 point, so a data rebuild and a model rebuild are always separate acts.
 
 This document is the **design rationale**. The **runbook** is
-[model/README.md](../model/README.md).
+[models/README.md](../models/README.md).
 
 ## Where it runs
 
-Kaggle, via [model/kaggle_run.py](../model/kaggle_run.py) — the only entry point,
+Kaggle, via [models/kaggle_run.py](../models/kaggle_run.py) — the only entry point,
 and it exits immediately anywhere else. Both published datasets are attached to
 the notebook as inputs; nothing is downloaded and nothing is uploaded.
 
 ```python
 !git clone -q https://github.com/heshannethmina/Srilanka-Flood-Data-Set-Creation /kaggle/working/repo
-!python /kaggle/working/repo/model/kaggle_run.py --stage ladder
+!python /kaggle/working/repo/models/kaggle_run.py --stage ladder
 ```
 
 Kaggle's default image already carries `torch`, `pandas`, `numpy`, `pyarrow`,
 `lightgbm` and `pillow`. There is no PyTorch Geometric requirement: the graph is
 51 nodes and 239 edges, so the relational GATv2 is written directly against torch
-scatter ops in [modules.py](../model/tfstgnn/modules.py).
+scatter ops in [modules.py](../models/floodlib/modules.py).
 
 Each run writes `runs/<preset>_<protocol>.json` (all metrics, both configs) and
 `..._preds.npz` (test probabilities, labels, day/node/event indices) so figures
@@ -87,24 +92,53 @@ floods" scores 98.1 %.
 
 ## Module map
 
+Shared — `floodlib/` owns the data and the evaluation, so a difference between
+the two families is a difference of architecture and never of protocol:
+
 | File | Contents |
 |---|---|
-| [kaggle_run.py](../model/kaggle_run.py) | the Kaggle entry point — stages, environment checks, summary table |
-| [config.py](../model/tfstgnn/config.py) | feature lists, `ModelConfig`, `TrainConfig`, the M0–M6 presets |
-| [data.py](../model/tfstgnn/data.py) | long panel → dense `[T, N, F]`, train-only normalisation, split masks, `SnapshotBatcher` |
-| [graph.py](../model/tfstgnn/graph.py) | relational `edge_index` + 4-dim edge attributes |
-| [modules.py](../model/tfstgnn/modules.py) | GRU + attention pooling, FiLM, ResNet-18 SAR stem, relational GATv2 |
-| [model.py](../model/tfstgnn/model.py) | the assembled network and its six heads |
-| [losses.py](../model/tfstgnn/losses.py) | focal × `label_confidence` + Huber, multi-head weighting |
-| [metrics.py](../model/tfstgnn/metrics.py) | PR-AUC, ROC-AUC, Brier decomposition, ECE, POD/FAR/CSI, event lead time |
-| [calibrate.py](../model/tfstgnn/calibrate.py) | temperature scaling, isotonic (PAVA, no sklearn) |
-| [train.py](../model/tfstgnn/train.py) | training loop, ensembling, calibration |
-| [baselines.py](../model/tfstgnn/baselines.py) | persistence, climatology, discharge-percentile rule, GBT |
-| [sar.py](../model/tfstgnn/sar.py) | SAR index join, causal frame map, LRU frame store |
+| [kaggle_run.py](../models/kaggle_run.py) | the Kaggle entry point — stages, environment checks, summary table |
+| [report.py](../models/report.py) | offline results table from a downloaded `runs/` |
+| [floodlib/schema.py](../models/floodlib/schema.py) | the column contract: feature lists, targets, `BaseModelConfig` |
+| [floodlib/traincfg.py](../models/floodlib/traincfg.py) | `TrainConfig`, `Preset` |
+| [floodlib/data.py](../models/floodlib/data.py) | long panel → dense `[T, N, F]`, train-only normalisation, split masks, `SnapshotBatcher` |
+| [floodlib/graph.py](../models/floodlib/graph.py) | relational `edge_index` + 4-dim edge attributes |
+| [floodlib/blocks.py](../models/floodlib/blocks.py) | layers both families use: GRU + attention pooling, FiLM, ResNet-18 SAR stem |
+| [floodlib/engine.py](../models/floodlib/engine.py) | the training loop both families run through — ensembling, calibration, thresholding |
+| [floodlib/losses.py](../models/floodlib/losses.py) | focal × `label_confidence` + Huber, multi-head weighting |
+| [floodlib/metrics.py](../models/floodlib/metrics.py) | PR-AUC, ROC-AUC, Brier decomposition, ECE, POD/FAR/CSI, event lead time |
+| [floodlib/calibrate.py](../models/floodlib/calibrate.py) | temperature scaling, isotonic (PAVA, no sklearn) |
+| [floodlib/baselines.py](../models/floodlib/baselines.py) | persistence, climatology, discharge-percentile rule, GBT |
+| [floodlib/sar.py](../models/floodlib/sar.py) | SAR index join, causal frame map, LRU frame store |
+
+Model 1 — the relational graph network described above:
+
+| File | Contents |
+|---|---|
+| [model1/config.py](../models/model1/config.py) | `ModelConfig`, the M0–M6 presets |
+| [model1/modules.py](../models/model1/modules.py) | the relational GATv2 |
+| [model1/model.py](../models/model1/model.py) | the assembled network and its six heads |
+| [model1/train.py](../models/model1/train.py) | preset table + model factory |
+
+Model 2 — a graph-free multimodal transformer, built to test whether the tree
+baseline can be beaten by a better *input layer* and whether the SAR branch was
+useless or merely fused badly:
+
+| File | Contents |
+|---|---|
+| [model2/config.py](../models/model2/config.py) | `MMFConfig`, the N0–N6 presets |
+| [model2/modules.py](../models/model2/modules.py) | periodic numerical embeddings, temporal + cross-feature transformers, gated SAR fusion |
+| [model2/model.py](../models/model2/model.py) | the assembled network and its six heads |
+| [model2/train.py](../models/model2/train.py) | preset table + model factory |
+| [model2/pretrain_sar.py](../models/model2/pretrain_sar.py) | chip-level SAR encoder pretraining on `image_manifest.csv` |
 
 ## Status
 
-The code is validated end to end — every preset, both vision modes, all three
-protocols and all four baselines have been run against a synthetic panel with
-the real schema. **No model has been trained on the real data yet**, so this
-document contains no results and none should be quoted from it.
+**Model 1** has been run end to end on the real data (2026-08-02, Kaggle T4,
+5.07 h, all five stages). Results and their caveats are in
+[models/README.md](../models/README.md); the two open items are the single-seed
+M2 confound and RQ1.
+
+**Model 2** is implemented and verified on synthetic tensors — every preset
+forwards and backwards with all parameters receiving gradients — but **has not
+been trained on the real data**. No N-row exists yet and none should be quoted.

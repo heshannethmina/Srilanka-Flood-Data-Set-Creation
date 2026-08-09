@@ -4,7 +4,7 @@ Every baseline is scored on **exactly** the sample set the network sees: same
 protocol, same `valid_sample` filter, same lookback warm-up cut. Anything less
 and the comparison is not a comparison.
 
-    python -m tfstgnn.baselines --protocol temporal --out runs
+    python -m floodlib.baselines --protocol temporal --out runs
 
 Baseline 3 (the discharge-percentile rule) is the real bar: it is what GloFAS
 already tells an operator for free. Baseline 4 (gradient-boosted trees) is the

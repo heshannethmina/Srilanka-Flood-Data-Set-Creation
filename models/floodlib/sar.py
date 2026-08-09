@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from .config import SAR_SCALARS
+from .schema import SAR_SCALARS
 
 VV_RANGE = (-30.0, 5.0)
 VH_RANGE = (-30.0, 5.0)

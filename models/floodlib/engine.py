@@ -1,34 +1,45 @@
-"""Training / evaluation driver for the M0 → M6 ladder.
+"""Model-agnostic training / evaluation engine.
 
-    python -m tfstgnn.train --preset M3
-    python -m tfstgnn.train --preset M5 --protocol temporal --out runs/M5
-    python -m tfstgnn.train --preset M3 --protocol random   # RQ2 diagnostic only
+Every model family runs through this one file. A family supplies a `build_model`
+callable and a preset table; everything else — the split protocol, the loss, the
+early-stopping criterion, the ensembling, the calibration, the threshold search
+and the metrics — is fixed here.
 
-Everything the proposal calls for is enforced here rather than left to the
-operator: normalisation and thresholds come from train/val only, the decision
-threshold is chosen on validation, and the calibrator is fitted on validation
-and frozen before test is ever touched.
+That is deliberate and it is the reason the engine exists at all. If `model1`
+and `model2` each owned a copy of this loop, a drift in either one (a different
+early-stopping metric, a threshold fitted on a different split) would silently
+turn the comparison between them into a comparison of evaluation protocols. The
+proposal's central claim is about leakage control; the code has to be at least
+as careful as the claim.
+
+Enforced here rather than left to the operator: normalisation and thresholds
+come from train/val only, the decision threshold is chosen on validation, and
+the calibrator is fitted on validation and frozen before test is ever touched.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import os
 import time
 from dataclasses import asdict, replace
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from .calibrate import apply_temperature, fit_isotonic, fit_temperature
-from .config import PRESETS, ModelConfig, TrainConfig
 from .data import Panel, SnapshotBatcher, build_panel, load_panel
 from .graph import build_graph
 from .losses import MultiHeadLoss
 from .metrics import best_threshold, evaluate
-from .model import TFSTGNN
+from .schema import BaseModelConfig
+from .traincfg import Preset, TrainConfig
+
+#: A family's factory: (model config, graph or None) → an nn.Module whose
+#: forward signature is (x, s, img, img_pos, img_mask, img_age).
+ModelBuilder = Callable[[BaseModelConfig, object], nn.Module]
 
 
 def resolve_device(spec: str = "auto") -> torch.device:
@@ -41,6 +52,10 @@ def set_seed(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def n_params(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 # --------------------------------------------------------------- predictions
@@ -57,14 +72,14 @@ def _image_inputs(b: Dict, store, px: int, device: torch.device):
 
 
 @torch.no_grad()
-def collect(model: TFSTGNN, batcher: SnapshotBatcher, S: torch.Tensor,
-            device: torch.device, store=None) -> Dict[str, np.ndarray]:
+def collect(model: nn.Module, batcher: SnapshotBatcher, S: torch.Tensor,
+            device: torch.device, px: int, store=None) -> Dict[str, np.ndarray]:
     """Run the model over a split and flatten to 1-D arrays of valid node-days."""
     model.eval()
     logits, ys, days, nodes, events = [], [], [], [], []
     for b in batcher:
         x = torch.as_tensor(b["x"], device=device)
-        img, ipos, imask, age = _image_inputs(b, store, model.cfg.image_px, device)
+        img, ipos, imask, age = _image_inputs(b, store, px, device)
         out = model(x, S, img, ipos, imask, age)
         m = b["mask"] > 0                                   # [B, N]
         lg = out["logits"][..., 0].detach().cpu().numpy()
@@ -82,20 +97,21 @@ def collect(model: TFSTGNN, batcher: SnapshotBatcher, S: torch.Tensor,
 
 # ------------------------------------------------------------------ training
 
-def train_one(panel: Panel, mcfg: ModelConfig, tcfg: TrainConfig,
-              graph, device: torch.device, verbose: bool = True,
+def train_one(build_model: ModelBuilder, panel: Panel, mcfg: BaseModelConfig,
+              tcfg: TrainConfig, graph, device: torch.device, verbose: bool = True,
               frame_map=None, store=None
-              ) -> Tuple[TFSTGNN, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+              ) -> Tuple[nn.Module, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     set_seed(tcfg.seed)
-    model = TFSTGNN(mcfg, graph).to(device)
+    model = build_model(mcfg, graph).to(device)
     S = torch.as_tensor(panel.S, device=device)
+    px = mcfg.image_px
 
     mk = lambda split, sh: SnapshotBatcher(panel, tcfg.protocol, split, mcfg.lookback,
                                            tcfg.batch_size, shuffle=sh,
                                            frame_map=frame_map)
     tr, va, te = mk("train", True), mk("val", False), mk("test", False)
     if verbose:
-        print(f"[train] params {model.n_params():,} | "
+        print(f"[train] params {n_params(model):,} | "
               f"train {tr.n_samples:,} ({tr.pos_rate:.3%} pos) · "
               f"val {va.n_samples:,} ({va.pos_rate:.3%}) · "
               f"test {te.n_samples:,} ({te.pos_rate:.3%})")
@@ -104,8 +120,10 @@ def train_one(panel: Panel, mcfg: ModelConfig, tcfg: TrainConfig,
         tcfg = replace(tcfg, pos_weight=(1 - tr.pos_rate) / max(tr.pos_rate, 1e-6))
 
     crit = MultiHeadLoss(tcfg, panel.cls_heads).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=tcfg.lr,
-                            weight_decay=tcfg.weight_decay)
+    # Frozen pretrained encoders contribute no gradients; handing their tensors
+    # to AdamW would still allocate optimiser state for them.
+    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                            lr=tcfg.lr, weight_decay=tcfg.weight_decay)
 
     def lr_at(ep: int) -> float:
         if ep < tcfg.warmup_epochs:
@@ -121,7 +139,7 @@ def train_one(panel: Panel, mcfg: ModelConfig, tcfg: TrainConfig,
         t0, tot, nb = time.time(), 0.0, 0
         for b in tr:
             x = torch.as_tensor(b["x"], device=device)
-            img, ipos, imask, age = _image_inputs(b, store, mcfg.image_px, device)
+            img, ipos, imask, age = _image_inputs(b, store, px, device)
             out = model(x, S, img, ipos, imask, age)
             loss = crit(out,
                         torch.as_tensor(b["y"], device=device),
@@ -136,7 +154,7 @@ def train_one(panel: Panel, mcfg: ModelConfig, tcfg: TrainConfig,
             nb += 1
         sched.step()
 
-        vp = collect(model, va, S, device, store)
+        vp = collect(model, va, S, device, px, store)
         vm = evaluate(vp["y"], 1 / (1 + np.exp(-vp["logit"])), 0.5,
                       vp["event"], vp["day"], vp["node"])
         score = vm.get("event_pr_auc", np.nan)
@@ -160,19 +178,27 @@ def train_one(panel: Panel, mcfg: ModelConfig, tcfg: TrainConfig,
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    return (model, collect(model, va, S, device, store),
-            collect(model, te, S, device, store))
+    return (model, collect(model, va, S, device, px, store),
+            collect(model, te, S, device, px, store))
 
 
 # ------------------------------------------------------------------ pipeline
 
-def run(preset: str = "M3", protocol: Optional[str] = None, root: Optional[str] = None,
-        out_dir: Optional[str] = None, epochs: Optional[int] = None,
-        n_seeds: Optional[int] = None, device_spec: str = "auto",
-        max_far: Optional[float] = None, verbose: bool = True,
-        sar_root: Optional[str] = None, image_px: Optional[int] = None,
-        batch_size: Optional[int] = None, tag: Optional[str] = None) -> Dict:
-    p = PRESETS[preset]
+def run(preset: str, presets: Dict[str, Preset], build_model: ModelBuilder, *,
+        family: str = "model", protocol: Optional[str] = None,
+        root: Optional[str] = None, out_dir: Optional[str] = None,
+        epochs: Optional[int] = None, n_seeds: Optional[int] = None,
+        device_spec: str = "auto", max_far: Optional[float] = None,
+        verbose: bool = True, sar_root: Optional[str] = None,
+        image_px: Optional[int] = None, batch_size: Optional[int] = None,
+        tag: Optional[str] = None, **model_overrides) -> Dict:
+    """Train `preset` from `presets` and write its result JSON.
+
+    `model_overrides` are applied to the model config after the preset, which is
+    how a family exposes its own knobs (e.g. model2's pretrained SAR encoder
+    path) without the engine needing to know they exist.
+    """
+    p = presets[preset]
     mcfg, tcfg = p.model, p.train
     if protocol:
         tcfg = replace(tcfg, protocol=protocol)
@@ -184,9 +210,13 @@ def run(preset: str = "M3", protocol: Optional[str] = None, root: Optional[str] 
         tcfg = replace(tcfg, batch_size=batch_size)
     if image_px is not None:
         mcfg = replace(mcfg, image_px=image_px)
+    overrides = {k: v for k, v in model_overrides.items() if v is not None}
+    if overrides:
+        mcfg = replace(mcfg, **overrides)
 
     device = resolve_device(device_spec)
-    print(f"[run] preset {preset} ({p.answers}) | protocol {tcfg.protocol} | {device}")
+    print(f"[run] {family} preset {preset} ({p.answers}) | "
+          f"protocol {tcfg.protocol} | {device}")
 
     df, nodes, edges = load_panel(root)
     panel = build_panel(df, nodes, truncate_after=tcfg.truncate_after)
@@ -211,12 +241,15 @@ def run(preset: str = "M3", protocol: Optional[str] = None, root: Optional[str] 
     val_logits: List[np.ndarray] = []
     test_logits: List[np.ndarray] = []
     val_ref = test_ref = None
+    params = 0
     for k in range(max(tcfg.n_seeds, 1)):
         seed_cfg = replace(tcfg, seed=tcfg.seed + k)
         if verbose and tcfg.n_seeds > 1:
             print(f"[seed {k+1}/{tcfg.n_seeds}]")
-        _, vp, tp = train_one(panel, mcfg, seed_cfg, graph, device, verbose,
-                              frame_map, store)
+        model, vp, tp = train_one(build_model, panel, mcfg, seed_cfg, graph,
+                                  device, verbose, frame_map, store)
+        params = n_params(model)
+        del model                       # a 5-seed CNN ensemble will not fit otherwise
         val_logits.append(vp["logit"])
         test_logits.append(tp["logit"])
         val_ref, test_ref = vp, tp
@@ -246,8 +279,8 @@ def run(preset: str = "M3", protocol: Optional[str] = None, root: Optional[str] 
     thr = best_threshold(val_ref["y"], v_prob, "f1", max_far=max_far)
 
     results = {
-        "preset": preset, "protocol": tcfg.protocol,
-        "n_params": TFSTGNN(mcfg, graph).n_params(),
+        "preset": preset, "family": family, "protocol": tcfg.protocol,
+        "n_params": params,
         "temperature": temperature, "threshold": thr,
         "val": evaluate(val_ref["y"], v_prob, thr,
                         val_ref["event"], val_ref["day"], val_ref["node"]),
@@ -281,9 +314,10 @@ def run(preset: str = "M3", protocol: Optional[str] = None, root: Optional[str] 
     return results
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Train the TF-STGNN flood model.")
-    ap.add_argument("--preset", default="M3", choices=list(PRESETS))
+# --------------------------------------------------------------------- CLI
+
+def add_common_args(ap) -> None:
+    """The argparse flags every family's `train.py` accepts identically."""
     ap.add_argument("--protocol", default=None,
                     choices=["temporal", "basin", "event", "random"])
     ap.add_argument("--root", default=None, help="dir holding flood_dataset.parquet")
@@ -297,11 +331,7 @@ def main() -> None:
     ap.add_argument("--image-px", type=int, default=None,
                     help="downscale SAR frames (256 halves VRAM vs 512)")
     ap.add_argument("--batch-size", type=int, default=None)
+    ap.add_argument("--tag", default=None,
+                    help="suffix for the output filename, so a variant run does "
+                         "not overwrite the canonical one")
     ap.add_argument("--quiet", action="store_true")
-    a = ap.parse_args()
-    run(a.preset, a.protocol, a.root, a.out, a.epochs, a.seeds, a.device,
-        a.max_far, not a.quiet, a.sar_root, a.image_px, a.batch_size)
-
-
-if __name__ == "__main__":
-    main()

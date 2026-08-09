@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from .config import (
+from .schema import (
     CLS_HEADS, DYNAMIC_FEATURES, LOG1P_FEATURES, POSITIONS, REG_HEADS,
     STATIC_CONTINUOUS, ZONES, Protocol,
 )
