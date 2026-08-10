@@ -32,6 +32,14 @@ COLUMNS = [
     ("event_detection_rate", "ev.det", 7, 3), ("mean_lead_days", "lead", 6, 2),
 ]
 
+#: Raw contingency counts, shown only with `--counts`. Off by default so the
+#: headline table stays the width it has been quoted at; `missed` and `f.alarm`
+#: are the two an operator actually reads.
+COUNT_COLUMNS = [
+    ("fn", "missed", 8), ("fp", "f.alarm", 9),
+    ("tp", "hits", 7), ("tn", "nulls", 9),
+]
+
 #: Print order. A group absent from the run directory is simply skipped.
 #: ASCII only: this table is printed to Kaggle logs and to Windows consoles,
 #: and a cp1252 terminal turns an em dash into a replacement character.
@@ -82,10 +90,14 @@ def _fmt_params(v) -> str:
 
 
 def render(rows: List[Dict], title: str = "FLOOD EARLY-WARNING EVALUATION SUMMARY",
-           show_params: bool = True) -> str:
-    width = 20 + 11 + sum(w for _, _, w, _ in COLUMNS) + (8 if show_params else 0)
-    header = f"{'Model':<20s}{'Protocol':<11s}" + "".join(
-        f"{h:>{w}s}" for _, h, w, _ in COLUMNS) + (f"{'params':>8s}" if show_params else "")
+           show_params: bool = True, show_counts: bool = False) -> str:
+    counts = COUNT_COLUMNS if show_counts else []
+    width = (20 + 11 + sum(w for _, _, w, _ in COLUMNS)
+             + sum(w for _, _, w in counts) + (8 if show_params else 0))
+    header = (f"{'Model':<20s}{'Protocol':<11s}"
+              + "".join(f"{h:>{w}s}" for _, h, w, _ in COLUMNS)
+              + "".join(f"{h:>{w}s}" for _, h, w in counts)
+              + (f"{'params':>8s}" if show_params else ""))
     rule = "=" * width
     out = [rule, title.center(width), rule, header, "-" * width]
 
@@ -103,10 +115,18 @@ def render(rows: List[Dict], title: str = "FLOOD EARLY-WARNING EVALUATION SUMMAR
                 v = r.get(key)
                 # A baseline with no event metrics must read as absent, not zero.
                 line += f"{'--':>{w}s}" if v is None else f"{v:>{w}.{dec}f}"
+            for key, _, w in counts:
+                v = r.get(key)
+                line += f"{'--':>{w}s}" if v is None else f"{int(v):>{w}d}"
             if show_params:
                 line += _fmt_params(r.get("n_params"))
             out.append(line)
     out.append(rule)
+    if show_counts:
+        out.append("missed/f.alarm are node-day counts and flatter the model: most "
+                   "hits are days")
+        out.append("inside an ongoing flood. Use rethreshold.py for the "
+                   "episode-level breakdown.")
     return "\n".join(out)
 
 
@@ -119,17 +139,21 @@ def main() -> None:
     ap.add_argument("--title", default="FLOOD EARLY-WARNING EVALUATION SUMMARY")
     ap.add_argument("--no-params", action="store_true",
                     help="drop the parameter-count column")
+    ap.add_argument("--counts", action="store_true",
+                    help="add the raw contingency counts: missed floods (FN), "
+                         "false alarms (FP), hits (TP), correct nulls (TN)")
     a = ap.parse_args()
 
     rows = collect(a.run_dir, a.protocol)
     if not rows:
         raise SystemExit(f"no result JSON under {a.run_dir!r} — download "
                          "runs.zip from the Kaggle notebook output and unzip it")
-    print(render(rows, a.title, show_params=not a.no_params))
+    print(render(rows, a.title, show_params=not a.no_params, show_counts=a.counts))
 
     if a.csv:
         import csv
-        keys = ["model", "protocol", "group", "n_params"] + [k for k, _, _, _ in COLUMNS]
+        keys = (["model", "protocol", "group", "n_params"]
+                + [k for k, _, _, _ in COLUMNS] + [k for k, _, _ in COUNT_COLUMNS])
         with open(a.csv, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
             w.writeheader()

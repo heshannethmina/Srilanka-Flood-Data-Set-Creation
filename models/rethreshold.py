@@ -36,7 +36,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from floodlib.metrics import contingency, evaluate   # noqa: E402
+from floodlib.metrics import contingency, episode_outcomes, evaluate   # noqa: E402
 
 
 def threshold_for_far(y: np.ndarray, p: np.ndarray, target_far: float,
@@ -86,25 +86,40 @@ def collect(run_dir: str, protocol: Optional[str] = "temporal") -> List[Dict]:
 
 
 def render(rows: List[Dict], target_far: float) -> str:
-    head = (f"{'Model':<16s}{'thr':>9s}{'FAR':>7s}{'POD':>7s}{'CSI':>7s}"
-            f"{'ev.det':>8s}{'lead':>7s}   {'ev.det @own':>12s}{'own FAR':>9s}")
+    head = (f"{'Model':<16s}{'FAR':>7s}{'POD':>7s}{'CSI':>7s}"
+            f"{'missed':>8s}{'f.alarm':>8s}"
+            f"{'early':>7s}{'late':>6s}{'never':>7s}"
+            f"{'early%':>8s}{'never%':>8s}{'lead':>7s}")
     rule = "=" * len(head)
-    out = [rule, f"EVENT DETECTION AT A MATCHED FAR OF {target_far:.3f}".center(len(head)),
+    out = [rule,
+           f"MATCHED AT FAR = {target_far:.3f}  ({rows[0]['matched'].get('n_events', 0)} test episodes)".center(len(head)),
            rule, head, "-" * len(head)]
-    for r in sorted(rows, key=lambda r: -(r["matched"].get("event_detection_rate") or 0)):
-        m = r["matched"]
+    for r in sorted(rows, key=lambda r: -(r["episodes"].get("warned_early_rate") or 0)):
+        m, e = r["matched"], r["episodes"]
         out.append(
-            f"{r['model'][:15]:<16s}{r['thr']:>9.5f}{m.get('far', np.nan):>7.3f}"
+            f"{r['model'][:15]:<16s}{m.get('far', np.nan):>7.3f}"
             f"{m.get('pod', np.nan):>7.3f}{m.get('csi', np.nan):>7.3f}"
-            f"{m.get('event_detection_rate', np.nan):>8.3f}"
-            f"{m.get('mean_lead_days', np.nan):>7.2f}   "
-            f"{r['own'].get('event_detection_rate', np.nan):>12.3f}"
-            f"{r['own'].get('far', np.nan):>9.3f}")
+            f"{m.get('fn', 0):>8d}{m.get('fp', 0):>8d}"
+            f"{e.get('warned_early', 0):>7d}{e.get('warned_late', 0):>6d}"
+            f"{e.get('never_warned', 0):>7d}"
+            f"{e.get('warned_early_rate', np.nan):>8.3f}"
+            f"{e.get('never_warned_rate', np.nan):>8.3f}"
+            f"{e.get('episode_mean_lead_days', np.nan):>7.2f}")
     out.append(rule)
-    out.append("Left block: every model forced to the same false-alarm rate.")
-    out.append("Right block: what each model reported at its own validation-chosen")
-    out.append("threshold. A large gap between the two means that model's headline")
-    out.append("ev.det was an operating-point artefact.")
+    out += [
+        "Every model is forced to the same false-alarm rate, so these columns",
+        "compare models rather than operating points.",
+        "",
+        "  missed/f.alarm  node-day false negatives / false positives",
+        "  early           episodes with an alarm in onset-7 .. onset-1  (= ev.det)",
+        "  late            no pre-onset alarm, but one during the episode",
+        "  never           no alarm at all from onset-7 to the episode's end",
+        "",
+        "'late' is a lead-time failure; 'never' is a forecasting failure. ev.det",
+        "alone cannot tell them apart, and node-day POD hides both -- it is",
+        "dominated by days inside an ongoing flood, which autocorrelation makes",
+        "nearly free to predict.",
+    ]
     return "\n".join(out)
 
 
@@ -130,20 +145,25 @@ def main() -> None:
         r["thr"] = threshold_for_far(r["y"], r["p"], a.far)
         r["matched"] = evaluate(r["y"], r["p"], r["thr"],
                                 r["event"], r["day"], r["node"])
+        r["episodes"] = episode_outcomes(r["p"], r["event"], r["day"], r["node"],
+                                         r["thr"])
     print(render(rows, a.far))
 
     if a.csv:
         import csv
-        keys = ["model", "family", "protocol", "thr", "far", "pod", "csi",
-                "event_detection_rate", "mean_lead_days"]
+        matched_keys = ["far", "pod", "csi", "tp", "fp", "fn", "tn"]
+        episode_keys = ["n_events", "warned_early", "warned_late", "never_warned",
+                        "warned_early_rate", "never_warned_rate",
+                        "episode_mean_lead_days"]
+        keys = ["model", "family", "protocol", "thr"] + matched_keys + episode_keys
         with open(a.csv, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
             w.writeheader()
             for r in rows:
                 w.writerow({"model": r["model"], "family": r["family"],
                             "protocol": r["protocol"], "thr": r["thr"],
-                            **{k: r["matched"].get(k) for k in keys[4:]},
-                            "far": r["matched"].get("far")})
+                            **{k: r["matched"].get(k) for k in matched_keys},
+                            **{k: r["episodes"].get(k) for k in episode_keys}})
         print(f"\nwrote {a.csv}")
 
 

@@ -6,7 +6,7 @@ positive rate, "never flood" scores 98.1%.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -171,6 +171,59 @@ def event_metrics(p: np.ndarray, event: np.ndarray, day: np.ndarray, node: np.nd
             "event_detection_rate": detected / max(n_ev, 1),
             "mean_lead_days": float(np.mean(leads)) if leads else float("nan"),
             "median_lead_days": float(np.median(leads)) if leads else float("nan")}
+
+
+def episode_outcomes(p: np.ndarray, event: np.ndarray, day: np.ndarray,
+                     node: np.ndarray, threshold: float,
+                     max_lead: int = 7) -> Dict[str, float]:
+    """Sort every flood episode into warned-early / warned-late / never-warned.
+
+    `event_detection_rate` collapses two very different failures into one number.
+    An episode the model flagged on the day it began and an episode it never
+    flagged at all both count as undetected — but to an operator the first is a
+    late warning and the second is a total miss, and only the second is a failure
+    of the model's forecasting ability rather than of its lead time.
+
+        early   an alarm in `onset − max_lead … onset − 1`
+                (identical to what `event_detection_rate` counts)
+        late    no pre-onset alarm, but one during the episode itself
+        never   no alarm anywhere from `onset − max_lead` to the episode's end
+
+    Node-day recall (POD) hides this entirely: it is dominated by days *inside*
+    an ongoing flood, which discharge autocorrelation makes nearly free to
+    predict.
+    """
+    p, event, day, node = (np.asarray(a).ravel() for a in (p, event, day, node))
+    alarms: Dict[int, np.ndarray] = {}
+    for nd in np.unique(node):
+        sel = node == nd
+        alarms[int(nd)] = np.sort(day[sel][p[sel] >= threshold])
+
+    early = late = never = 0
+    leads: List[float] = []
+    ev_ids = np.unique(event[event >= 0])
+    for e in ev_ids:
+        sel = event == e
+        d = day[sel]
+        onset, end = int(d.min()), int(d.max())
+        nd = int(node[sel][0])
+        a = alarms.get(nd, np.empty(0))
+        pre = a[(a >= onset - max_lead) & (a <= onset - 1)]
+        if pre.size:
+            early += 1
+            leads.append(onset - int(pre.min()))
+        elif a[(a >= onset) & (a <= end)].size:
+            late += 1
+        else:
+            never += 1
+
+    n = len(ev_ids)
+    return {"n_events": n,
+            "warned_early": early, "warned_late": late, "never_warned": never,
+            "warned_early_rate": early / max(n, 1),
+            "warned_late_rate": late / max(n, 1),
+            "never_warned_rate": never / max(n, 1),
+            "episode_mean_lead_days": float(np.mean(leads)) if leads else float("nan")}
 
 
 def event_pr_auc(y: np.ndarray, p: np.ndarray, event: np.ndarray,
