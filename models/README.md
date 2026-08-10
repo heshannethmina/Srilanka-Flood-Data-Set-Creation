@@ -219,8 +219,36 @@ fair, and `--presets M2,M3 --ladder-seeds 5` is the run that fixes it. **RQ1
 (directed flow edges) remains unresolved**: M2→M3 falls on every test metric but
 rises on validation, at n=1 each.
 
-**Model 2** — implemented and verified end to end on synthetic tensors
-(all presets forward and backward, every parameter receiving a gradient); N5 is
-710,870 parameters against model 1's 581,319, so the two are comparable in size.
-**It has not yet been trained on the real data.** No N-row exists, and nothing in
-this README should be read as a result until `--stage ladder2` has run.
+**Model 2** — first full run 2026-08-10, Kaggle T4: `ladder2` 2.45 h, `sar2`
+6.62 h, `sar_pretrain` failed (fixed since — the manifest is not in the Kaggle
+dataset, only in the repo).
+
+| Preset | Change | PR-AUC | ev.det | FAR | ECE | params |
+|---|---|---|---|---|---|---|
+| N0 | linear feature embeddings | 0.6083 | 0.290 | 0.412 | 0.0024 | 551k |
+| N1 | **+ periodic (PLR) embeddings** | **0.7605** | 0.420 | 0.325 | 0.0053 | 555k |
+| N2 | + cross-feature attention | 0.7738 | **0.423** | 0.313 | 0.0056 | 693k |
+| N3 | + FiLM terrain | **0.8269** | 0.197 | 0.110 | 0.0032 | 711k |
+| N4 | + focal × confidence | 0.7592 | 0.220 | 0.138 | 0.0525 | 711k |
+| N5 ×5 | + ensemble + temperature | 0.7846 | 0.208 | 0.145 | 0.0043 | 711k |
+| N6_scalars ×5 | + SAR scalars | 0.7284 | 0.397 | 0.344 | 0.0055 | 719k |
+| N6_gated ×5 | + gated SAR CNN | **0.8310** | 0.217 | 0.107 | 0.0066 | 11,967k |
+
+Three findings:
+
+1. **Periodic numerical embeddings are the single largest gain in the project.**
+   N0 → N1 changes nothing but the input layer and moves PR-AUC +0.152 and event
+   detection +0.130. The tabular-embedding hypothesis holds.
+2. **The gap to gradient-boosted trees is largely closed.** Model 1's best was
+   0.7421 against the GBT's 0.8496 — 0.108 behind. N3 reaches 0.8269 and clears
+   the discharge-percentile rule (0.8164) outright, at 711k parameters.
+3. **The focal rung is a regression, not a gain.** N3 → N4 costs 0.068 PR-AUC and
+   makes calibration 16× worse (ECE 0.0032 → 0.0525); the ensemble in N5 recovers
+   only part of it. `N5_bce` and `N6_gated_bce` apply the ensemble and calibrator
+   to the loss that was actually working, and have not been run yet.
+
+**Do not read the `ev.det` column down the ladder** — the thresholds differ
+(FAR ranges 0.107 to 0.412), so it compares operating points rather than models.
+Use [`rethreshold.py`](rethreshold.py) to force a common false-alarm rate first.
+
+Confirmed by this run: imagery covers **9 of 51 nodes**, 2,578 frames.

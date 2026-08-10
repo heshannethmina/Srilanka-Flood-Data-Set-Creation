@@ -91,10 +91,21 @@ PRESETS: Dict[str, Preset] = {
         _t(loss="focal_conf"),
     ),
     "N5": Preset(
-        "N5", "headline — 5-seed deep ensemble + temperature scaling",
+        "N5", "5-seed deep ensemble + temperature scaling, on the focal loss",
         _m(num_embed="plr", feature_attn=True, static_mode="film",
            vision_mode="none"),
         _t(loss="focal_conf", n_seeds=5, calibration="temperature"),
+    ),
+    "N5_bce": Preset(
+        # The first ladder2 run showed the focal rung is a regression, not a
+        # gain: N3 (BCE) scored PR-AUC 0.8269 with ECE 0.0032, N4 (focal) 0.7592
+        # with ECE 0.0525, and N5 recovered only to 0.7846. This rung applies the
+        # ensemble and the calibrator to the loss that was actually working, and
+        # is the headline candidate.
+        "N5_bce", "headline candidate — N3 plus 5-seed ensemble + temperature",
+        _m(num_embed="plr", feature_attn=True, static_mode="film",
+           vision_mode="none"),
+        _t(loss="bce", n_seeds=5, calibration="temperature"),
     ),
     "N6_scalars": Preset(
         "N6_scalars", "RQ5 again — SAR scalars appended to the dynamic stream",
@@ -107,6 +118,15 @@ PRESETS: Dict[str, Preset] = {
         _m(num_embed="plr", feature_attn=True, static_mode="film",
            vision_mode="cnn", image_px=512, sar_freeze=True),
         _t(loss="focal_conf", n_seeds=5, calibration="temperature", batch_size=8),
+    ),
+    "N6_gated_bce": Preset(
+        # N6_gated (0.8310, 11.97M params) barely cleared N3 (0.8269, 711k
+        # params) -- so the imagery may only be recovering what the focal loss
+        # destroyed. Run against the BCE ladder to find out which it is.
+        "N6_gated_bce", "RQ8 — the gated SAR branch, against the BCE ladder",
+        _m(num_embed="plr", feature_attn=True, static_mode="film",
+           vision_mode="cnn", image_px=512, sar_freeze=True),
+        _t(loss="bce", n_seeds=5, calibration="temperature", batch_size=8),
     ),
     "N6_gated_ft": Preset(
         "N6_gated_ft", "RQ8 — as N6_gated but the encoder is fine-tuned, not frozen",

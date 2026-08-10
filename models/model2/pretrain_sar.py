@@ -33,10 +33,11 @@ later as an inexplicably good test score.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -55,6 +56,37 @@ MANIFEST = "image_manifest.csv"
 
 # ------------------------------------------------------------------- labelling
 
+def resolve_manifest(root: Optional[str] = None) -> str:
+    """Locate `image_manifest.csv`.
+
+    It is **not** part of the published Kaggle tabular dataset — it lives in the
+    repo under `data/processed/`, because it describes which chips were
+    requested rather than which rows the panel holds. Looking only beside the
+    parquet is what made the first Kaggle run fail, so every plausible location
+    is tried and the list is reported when none of them has it.
+    """
+    cands: List[str] = []
+    if root:
+        cands.append(os.path.join(root, MANIFEST))
+    if os.environ.get("FLOOD_DATA_ROOT"):
+        cands.append(os.path.join(os.environ["FLOOD_DATA_ROOT"], MANIFEST))
+    try:
+        cands.append(os.path.join(resolve_root(root), MANIFEST))
+    except FileNotFoundError:
+        pass
+    cands.append(os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "data", "processed", MANIFEST)))
+    cands += sorted(glob.glob(f"/kaggle/input/**/{MANIFEST}", recursive=True),
+                    key=len)
+    for c in cands:
+        if os.path.exists(c):
+            return c
+    raise FileNotFoundError(
+        f"{MANIFEST} not found in any of:\n  " + "\n  ".join(cands) +
+        "\nIt is versioned in the repo at data/processed/, so a full clone has "
+        "it; pass --root to point at another copy.")
+
+
 def label_frames(idx: pd.DataFrame, root: Optional[str] = None,
                  verbose: bool = True) -> pd.DataFrame:
     """Attach a flood/dry label and a train/val split to every usable SAR frame.
@@ -62,12 +94,9 @@ def label_frames(idx: pd.DataFrame, root: Optional[str] = None,
     Returns one row per matched frame with `frame_pos` (its positional index into
     `idx`, which is what `FrameStore.get` takes), `label` and `split`.
     """
-    data_root = resolve_root(root)
-    man_path = os.path.join(data_root, MANIFEST)
-    if not os.path.exists(man_path):
-        raise FileNotFoundError(
-            f"{MANIFEST} not found in {data_root}. It ships with the tabular "
-            "dataset and carries the chip labels this script trains on.")
+    man_path = resolve_manifest(root)
+    if verbose:
+        print(f"[pretrain] manifest {man_path}")
 
     man = pd.read_csv(man_path)
     man["target_date"] = pd.to_datetime(man["target_date"])
