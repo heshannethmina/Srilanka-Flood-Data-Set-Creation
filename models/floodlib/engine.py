@@ -100,7 +100,8 @@ def collect(model: nn.Module, batcher: SnapshotBatcher, S: torch.Tensor,
 def train_one(build_model: ModelBuilder, panel: Panel, mcfg: BaseModelConfig,
               tcfg: TrainConfig, graph, device: torch.device, verbose: bool = True,
               frame_map=None, store=None
-              ) -> Tuple[nn.Module, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+              ) -> Tuple[nn.Module, Dict[str, np.ndarray], Dict[str, np.ndarray],
+                         List[Dict]]:
     set_seed(tcfg.seed)
     model = build_model(mcfg, graph).to(device)
     S = torch.as_tensor(panel.S, device=device)
@@ -134,23 +135,39 @@ def train_one(build_model: ModelBuilder, panel: Panel, mcfg: BaseModelConfig,
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_at)
 
     best_score, best_state, bad = -np.inf, None, 0
+    history: List[Dict] = []
     for ep in range(tcfg.epochs):
         model.train()
         t0, tot, nb = time.time(), 0.0, 0
+        cls_tot = reg_tot = 0.0
+        head_tot: Optional[np.ndarray] = None
+        gn_sum, gn_max, clipped = 0.0, 0.0, 0
         for b in tr:
             x = torch.as_tensor(b["x"], device=device)
             img, ipos, imask, age = _image_inputs(b, store, px, device)
             out = model(x, S, img, ipos, imask, age)
-            loss = crit(out,
-                        torch.as_tensor(b["y"], device=device),
-                        torch.as_tensor(b["r"], device=device),
-                        torch.as_tensor(b["mask"], device=device),
-                        torch.as_tensor(b["conf"], device=device))["loss"]
+            parts = crit(out,
+                         torch.as_tensor(b["y"], device=device),
+                         torch.as_tensor(b["r"], device=device),
+                         torch.as_tensor(b["mask"], device=device),
+                         torch.as_tensor(b["conf"], device=device))
+            loss = parts["loss"]
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
+            # clip_grad_norm_ returns the total norm *before* clipping; it was
+            # being thrown away, and it is the cheapest signal there is for
+            # whether the learning rate is sane.
+            gn = float(torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                                      tcfg.grad_clip))
             opt.step()
+            gn_sum += gn
+            gn_max = max(gn_max, gn)
+            clipped += int(gn > tcfg.grad_clip)
             tot += float(loss.detach())
+            cls_tot += float(parts["cls"])
+            reg_tot += float(parts["reg"])
+            ph = parts["per_head"].detach().cpu().numpy()
+            head_tot = ph if head_tot is None else head_tot + ph
             nb += 1
         sched.step()
 
@@ -161,10 +178,25 @@ def train_one(build_model: ModelBuilder, panel: Panel, mcfg: BaseModelConfig,
         if not np.isfinite(score):
             score = vm["pr_auc"]
 
+        d = max(nb, 1)
+        history.append({
+            "epoch": ep, "train_loss": tot / d,
+            "train_cls": cls_tot / d, "train_reg": reg_tot / d,
+            "per_head": (head_tot / d).tolist() if head_tot is not None else None,
+            "grad_norm_mean": gn_sum / d, "grad_norm_max": gn_max,
+            "clip_fraction": clipped / d,
+            "lr": float(opt.param_groups[0]["lr"]),
+            "val_pr_auc": vm["pr_auc"], "val_event_pr_auc": float(score),
+            "val_ece": vm["ece"], "val_brier": vm.get("brier"),
+            "val_pod": vm.get("pod"), "val_far": vm.get("far"),
+            "seconds": time.time() - t0,
+        })
+
         if verbose and (ep % tcfg.log_every == 0):
-            print(f"  ep {ep:3d}  loss {tot / max(nb,1):.5f}  "
+            print(f"  ep {ep:3d}  loss {tot / d:.5f}  "
                   f"val PR-AUC {vm['pr_auc']:.4f}  event PR-AUC {score:.4f}  "
-                  f"ECE {vm['ece']:.4f}  ({time.time()-t0:.1f}s)")
+                  f"ECE {vm['ece']:.4f}  |grad| {gn_sum / d:.2f} "
+                  f"clip {clipped / d:.0%}  ({time.time()-t0:.1f}s)")
 
         if score > best_score + 1e-5:
             best_score, bad = score, 0
@@ -179,7 +211,7 @@ def train_one(build_model: ModelBuilder, panel: Panel, mcfg: BaseModelConfig,
     if best_state is not None:
         model.load_state_dict(best_state)
     return (model, collect(model, va, S, device, px, store),
-            collect(model, te, S, device, px, store))
+            collect(model, te, S, device, px, store), history)
 
 
 # ------------------------------------------------------------------ pipeline
@@ -240,16 +272,30 @@ def run(preset: str, presets: Dict[str, Preset], build_model: ModelBuilder, *,
 
     val_logits: List[np.ndarray] = []
     test_logits: List[np.ndarray] = []
+    histories: List[List[Dict]] = []
+    per_seed: List[Dict] = []
+    gate_stats: List[float] = []
     val_ref = test_ref = None
     params = 0
     for k in range(max(tcfg.n_seeds, 1)):
         seed_cfg = replace(tcfg, seed=tcfg.seed + k)
         if verbose and tcfg.n_seeds > 1:
             print(f"[seed {k+1}/{tcfg.n_seeds}]")
-        model, vp, tp = train_one(build_model, panel, mcfg, seed_cfg, graph,
-                                  device, verbose, frame_map, store)
+        model, vp, tp, hist = train_one(build_model, panel, mcfg, seed_cfg, graph,
+                                        device, verbose, frame_map, store)
         params = n_params(model)
+        # A gated multimodal branch that never opens its gate contributes
+        # nothing; without this the only evidence would be a metric difference
+        # too small to attribute.
+        gate = getattr(getattr(model, "sar", None), "last_gate_mean", None)
+        if gate is not None:
+            gate_stats.append(float(gate))
         del model                       # a 5-seed CNN ensemble will not fit otherwise
+        histories.append(hist)
+        # Each seed scored on its own, so the spread between seeds is knowable
+        # and a small gap between two ladder rungs can be judged against it.
+        per_seed.append(evaluate(tp["y"], 1 / (1 + np.exp(-tp["logit"])), 0.5,
+                                 tp["event"], tp["day"], tp["node"]))
         val_logits.append(vp["logit"])
         test_logits.append(tp["logit"])
         val_ref, test_ref = vp, tp
@@ -298,6 +344,9 @@ def run(preset: str, presets: Dict[str, Preset], build_model: ModelBuilder, *,
             print(f"  {k:22s} {v:.4f}")
     print(f"  {'ECE (uncalibrated)':22s} {results['test_uncalibrated']['ece']:.4f}")
 
+    diag = build_diagnostics(results, histories, per_seed, panel, nodes,
+                             t_prob, test_ref, thr, tcfg, gate_stats, root, verbose)
+
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
         # `tag` keeps a variant run from overwriting the canonical one — re-running
@@ -306,12 +355,95 @@ def run(preset: str, presets: Dict[str, Preset], build_model: ModelBuilder, *,
         stem = f"{preset}_{tcfg.protocol}" + (f"_{tag}" if tag else "")
         with open(os.path.join(out_dir, f"{stem}.json"), "w") as f:
             json.dump(results, f, indent=2, default=float)
+        with open(os.path.join(out_dir, f"{stem}_diag.json"), "w") as f:
+            json.dump(diag, f, indent=2, default=float)
         np.savez_compressed(
             os.path.join(out_dir, f"{stem}_preds.npz"),
             test_prob=t_prob, test_y=test_ref["y"], test_day=test_ref["day"],
             test_node=test_ref["node"], test_event=test_ref["event"])
-        print(f"[run] wrote {out_dir}/{stem}.json")
+        print(f"[run] wrote {out_dir}/{stem}.json and {stem}_diag.json")
     return results
+
+
+# ---------------------------------------------------------------- diagnostics
+
+def build_diagnostics(results: Dict, histories: List[List[Dict]],
+                      per_seed: List[Dict], panel: Panel, nodes,
+                      t_prob: np.ndarray, test_ref: Dict, thr: float,
+                      tcfg: TrainConfig, gate_stats: List[float],
+                      root: Optional[str] = None, verbose: bool = True) -> Dict:
+    """Assemble everything needed to decide what to change next.
+
+    Wrapped section by section: a bug in a diagnostic must never destroy a run
+    that has already finished training, so each block degrades to an error string
+    rather than raising. Six hours of GPU time is not worth a KeyError.
+    """
+    from . import diagnostics as dg
+
+    diag: Dict = {"preset": results["preset"], "family": results["family"],
+                  "protocol": results["protocol"], "threshold": thr,
+                  "history": histories, "per_seed": per_seed}
+
+    def attempt(name, fn):
+        try:
+            diag[name] = fn()
+        except Exception as exc:                       # noqa: BLE001
+            diag[name] = {"error": f"{type(exc).__name__}: {exc}"}
+            if verbose:
+                print(f"[diag] {name} failed: {type(exc).__name__}: {exc}")
+
+    h0 = histories[0] if histories else []
+    attempt("seed_spread", lambda: dg.seed_spread(per_seed))
+    attempt("stopping", lambda: dg.stopping_report(h0, tcfg.patience))
+    attempt("optimisation", lambda: dg.optimisation_report(h0, tcfg.grad_clip))
+    attempt("head_balance", lambda: dg.head_balance(h0, panel.cls_heads))
+
+    # events.csv and nodes.csv carry the context that turns "missed" into
+    # "missed a severe flood on an upstream node".
+    meta_ev: Dict[str, Dict] = {}
+    try:
+        meta_ev = _events_meta(root)
+    except Exception as exc:                           # noqa: BLE001
+        if verbose:
+            print(f"[diag] events.csv not joined ({type(exc).__name__}) — "
+                  "episodes will have no severity")
+    meta_nd: Dict[str, Dict] = {}
+    try:
+        cols = [c for c in ("basin", "zone", "position", "elevation_m")
+                if c in nodes.columns]
+        meta_nd = nodes.set_index("node_id")[cols].to_dict("index")
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    attempt("episodes", lambda: dg.episode_table(
+        t_prob, test_ref["y"], test_ref["event"], test_ref["day"],
+        test_ref["node"], thr, panel.node_ids, panel.event_ids, meta_ev))
+    attempt("by_severity", lambda: dg.missed_by_severity(diag.get("episodes", [])))
+    attempt("nodes", lambda: dg.node_table(
+        t_prob, test_ref["y"], test_ref["node"], thr, panel.node_ids, meta_nd))
+    for by in ("zone", "position", "basin"):
+        attempt(f"by_{by}", lambda by=by: dg.group_breakdown(diag.get("nodes", []), by))
+
+    if gate_stats:
+        diag["sar_gate_mean"] = float(np.mean(gate_stats))
+        diag["sar_gate_per_seed"] = gate_stats
+    return diag
+
+
+def _events_meta(root: Optional[str] = None) -> Dict[str, Dict]:
+    """`event_id` → magnitude columns from the dataset's own events table.
+
+    `root` is threaded through from the caller rather than re-resolved: on
+    Kaggle the mount path is not one `resolve_root` knows about, and silently
+    losing the severity join would gut the most useful diagnostic there is.
+    """
+    import pandas as pd
+    from .data import resolve_root
+    path = os.path.join(resolve_root(root), "events.csv")
+    ev = pd.read_csv(path)
+    cols = [c for c in ("duration_days", "peak_discharge", "basin", "severity")
+            if c in ev.columns]
+    return ev.set_index("event_id")[cols].to_dict("index")
 
 
 # --------------------------------------------------------------------- CLI

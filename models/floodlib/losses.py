@@ -54,10 +54,14 @@ class MultiHeadLoss(torch.nn.Module):
             weight = weight * conf.unsqueeze(-1)
 
         denom = weight.sum().clamp_min(1.0)
-        cls = ((per * weight).sum(dim=(0, 1)) / denom * w).sum()
+        # Kept unreduced across heads: the per-head vector is what tells you
+        # whether the auxiliary heads are helping or competing with the primary
+        # one, and `head_weights` has never been tuned against that evidence.
+        per_head = (per * weight).sum(dim=(0, 1)) / denom          # [H]
+        cls = (per_head * w).sum()
 
         reg = F.huber_loss(out["reg"], r, reduction="none", delta=1.0)
         reg = (reg * m).sum() / (m.sum() * out["reg"].shape[-1]).clamp_min(1.0)
 
         return {"loss": cls + self.cfg.reg_weight * reg, "cls": cls.detach(),
-                "reg": reg.detach()}
+                "reg": reg.detach(), "per_head": per_head.detach()}

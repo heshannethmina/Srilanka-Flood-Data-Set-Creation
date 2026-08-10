@@ -165,6 +165,11 @@ class GatedSarFusion(nn.Module):
         nn.init.zeros_(self.gate[-1].weight)
         nn.init.constant_(self.gate[-1].bias, init_bias)
         self.norm = nn.LayerNorm(d_model)
+        #: Mean gate opening on node-days that actually have a frame, from the
+        #: last forward pass. Read by the diagnostics: a branch whose gate never
+        #: opens contributes nothing, and without this the only evidence would
+        #: be a metric difference too small to attribute to anything.
+        self.last_gate_mean: float = float("nan")
 
     def forward(self, h: torch.Tensor, v: torch.Tensor, pres: torch.Tensor,
                 age: torch.Tensor) -> torch.Tensor:
@@ -172,4 +177,7 @@ class GatedSarFusion(nn.Module):
         pres = pres.unsqueeze(-1)
         ctx = torch.cat([h, v, pres, (age / 30.0).unsqueeze(-1)], dim=-1)
         g = torch.sigmoid(self.gate(ctx))
+        with torch.no_grad():
+            denom = pres.sum().clamp_min(1.0) * g.size(-1)
+            self.last_gate_mean = float((g * pres).sum() / denom)
         return self.norm(h + g * self.proj(v) * pres)

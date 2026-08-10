@@ -150,6 +150,7 @@ Everything lands in `/kaggle/working/runs`:
 
 - `<preset>_<protocol>.json` — every metric plus the full model and training
   config, so a run is reproducible from its own output
+- `<preset>_<protocol>_diag.json` — the training diagnostics (below)
 - `<preset>_<protocol>_preds.npz` — test probabilities with day / node / event
   indices, so figures can be regenerated without retraining
 - `sar_encoder.pt` / `.json` — the pretrained encoder and its training curve
@@ -158,6 +159,30 @@ A summary table prints at the end of each invocation, grouped baselines → mode
 → model 2. Hit **Save Version** to keep `/kaggle/working` as downloadable
 notebook output. Offline, [`report.py`](report.py) renders the same table from a
 downloaded `runs/` directory.
+
+### Reading the diagnostics
+
+A results table says *what* a model scored, never why. Every run also writes
+`_diag.json`, and [`diagnose.py`](diagnose.py) turns it into decisions:
+
+```bash
+python models/diagnose.py runs/                 # every run
+python models/diagnose.py runs/N3_temporal_diag.json --episodes
+```
+
+| Section | The question it answers |
+|---|---|
+| seed spread | is the gap between two rungs bigger than the noise between seeds? |
+| early stopping | did patience fire while the model was still improving? |
+| gradients | is `grad_clip` doing the optimiser's job (`lr` too high) or nothing? |
+| per-head loss | are the auxiliary heads learning, or just consuming capacity? |
+| episodes | are the misses **threshold** misses (signal present, ranked too low) or **blind** ones (no signal at all)? These have opposite fixes. |
+| by severity | is detection *worse* on the largest floods? |
+| by zone / position | is failure concentrated upstream (features/lookback) or at outlets (routing)? |
+| SAR gate | did the gated imagery branch ever actually open? |
+
+Each section ends in a verdict rather than a number. The verdicts flag a
+condition; they do not promise the fix will work.
 
 ## What is in here
 

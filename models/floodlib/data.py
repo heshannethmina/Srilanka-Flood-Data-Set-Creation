@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -89,6 +89,7 @@ class Panel:
     reg_heads: List[str]
     splits: Dict[str, np.ndarray]  # protocol → [T, N] int8: 0 train, 1 val, 2 test, -1 unused
     norm: Dict[str, np.ndarray]    # {'mean','std'} used, kept for inference
+    event_ids: List[str] = field(default_factory=list)   # code → original event_id
 
     @property
     def shape(self) -> Tuple[int, int, int]:
@@ -174,9 +175,14 @@ def build_panel(
 
     # ---- event codes ------------------------------------------------------
     ev = np.full((T, N), -1, dtype=np.int32)
+    event_ids: List[str] = []
     if "event_id" in df.columns:
-        codes, _ = pd.factorize(df["event_id"], use_na_sentinel=True)
+        # The uniques are kept, not discarded: without them an episode code
+        # cannot be joined back to events.csv, and "which severity of flood do
+        # we miss?" is unanswerable.
+        codes, uniq = pd.factorize(df["event_id"], use_na_sentinel=True)
         ev[t_idx, n_idx] = codes.astype(np.int32)
+        event_ids = [str(u) for u in uniq]
 
     # ---- static terrain ---------------------------------------------------
     nd = nodes.set_index("node_id").reindex(node_ids)
@@ -209,6 +215,7 @@ def build_panel(
         basins=nd["basin"].tolist(), features=feats,
         cls_heads=cls_heads, reg_heads=list(REG_HEADS),
         splits=splits, norm={"mean": mean, "std": std},
+        event_ids=event_ids,
     )
 
 
