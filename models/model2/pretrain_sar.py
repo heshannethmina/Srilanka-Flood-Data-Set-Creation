@@ -88,38 +88,76 @@ def resolve_manifest(root: Optional[str] = None) -> str:
 
 
 def label_frames(idx: pd.DataFrame, root: Optional[str] = None,
-                 verbose: bool = True) -> pd.DataFrame:
+                 verbose: bool = True, max_offset_days: int = 6) -> pd.DataFrame:
     """Attach a flood/dry label and a train/val split to every usable SAR frame.
 
     Returns one row per matched frame with `frame_pos` (its positional index into
     `idx`, which is what `FrameStore.get` takes), `label` and `split`.
+
+    The join is on the manifest's **acquisition window**, not on `target_date`.
+    `target_date` is the day a chip was *requested* for; the frame's `date` is
+    when Sentinel-1 actually flew over, and with a ~12-day revisit the two
+    virtually never coincide — an exact-date join matched 48 of 2,578 frames.
+    `window_start`/`window_end` exist precisely to express that tolerance. If a
+    manifest ever lacks them, the fallback is the nearest requested date within
+    `max_offset_days` (half a revisit cycle).
     """
     man_path = resolve_manifest(root)
     if verbose:
         print(f"[pretrain] manifest {man_path}")
 
     man = pd.read_csv(man_path)
-    man["target_date"] = pd.to_datetime(man["target_date"])
-    man = (man[["node_id", "target_date", "label", "severity"]]
-           .drop_duplicates(subset=["node_id", "target_date"]))
+    for c in ("target_date", "window_start", "window_end"):
+        if c in man.columns:
+            man[c] = pd.to_datetime(man[c])
+    man = man[[c for c in ("node_id", "target_date", "window_start", "window_end",
+                           "label", "severity", "purpose") if c in man.columns]]
 
     frames = idx.reset_index(drop=True).copy()
     frames["frame_pos"] = np.arange(len(frames), dtype=np.int64)
     frames["date"] = pd.to_datetime(frames["date"])
 
-    merged = frames.merge(man, how="inner",
-                          left_on=["site_id", "date"],
-                          right_on=["node_id", "target_date"])
+    # Per-node cross product: at ~2.6k frames over 9 nodes against ~3.5k chips
+    # this is a few hundred thousand rows, which is nothing.
+    pairs = frames.merge(man, how="inner", left_on="site_id", right_on="node_id")
+    if pairs.empty:
+        raise RuntimeError(
+            "no frame shares a node code with the manifest. image_dataset.csv's "
+            "`site_id` and image_manifest.csv's `node_id` disagree.\n"
+            f"  frames:   {sorted(frames['site_id'].unique())[:6]} ...\n"
+            f"  manifest: {sorted(man['node_id'].unique())[:6]} ...")
+
+    pairs["offset_days"] = (pairs["date"] - pairs["target_date"]).dt.days.abs()
+    if {"window_start", "window_end"} <= set(pairs.columns):
+        hit = ((pairs["date"] >= pairs["window_start"])
+               & (pairs["date"] <= pairs["window_end"]))
+        sel, route = pairs[hit], "acquisition window"
+    else:
+        sel, route = pairs.iloc[:0], "acquisition window (columns absent)"
+    if sel.empty:
+        sel = pairs[pairs["offset_days"] <= max_offset_days]
+        route = f"nearest target_date within {max_offset_days}d"
+
+    # One row per frame. A frame inside both a flood window and a dry window is
+    # a flood chip, so label 1 wins; ties break to the closest requested date.
+    merged = (sel.sort_values(["frame_pos", "label", "offset_days"],
+                              ascending=[True, False, True])
+                 .drop_duplicates(subset="frame_pos", keep="first")
+                 .copy())
     if verbose:
         print(f"[pretrain] {len(frames)} frames · {len(man)} labelled chips · "
-              f"{len(merged)} matched on (site_id, date)")
+              f"{len(merged)} matched by {route}")
     if merged.empty:
         raise RuntimeError(
-            "no frame matched the manifest on (site_id, date). Check that "
-            "image_dataset.csv's site_id uses the same node codes as "
-            "image_manifest.csv's node_id.")
+            "node codes match but no frame falls inside any labelled window.\n"
+            f"  frame dates:    {frames['date'].min().date()} .. "
+            f"{frames['date'].max().date()}\n"
+            f"  manifest dates: {man['target_date'].min().date()} .. "
+            f"{man['target_date'].max().date()}\n"
+            f"  closest offset: {int(pairs['offset_days'].min())} days")
 
     # ---- split from the panel, so the main experiment's test block is safe --
+    data_root = resolve_root(root)
     panel_df = pd.read_parquet(os.path.join(data_root, PARQUET_NAME),
                                columns=["node_id", "date", "split_temporal"])
     panel_df["date"] = pd.to_datetime(panel_df["date"])

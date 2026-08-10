@@ -100,13 +100,38 @@ def show_inputs() -> None:
 
 
 def report_env() -> None:
+    """Print the GPU, and refuse to start if its architecture is unsupported.
+
+    Kaggle hands out both T4 (sm_75) and P100 (sm_60), and its PyTorch build
+    dropped sm_60. On a P100 every CUDA kernel fails with "no kernel image is
+    available for execution on the device" — but only once the first tensor
+    reaches the GPU, which is after the dataset load. Checking the arch list up
+    front turns a wasted session into a ten-second error with the fix in it.
+    """
     try:
         import torch
-        gpu = (torch.cuda.get_device_name(0) if torch.cuda.is_available()
-               else "CPU only — enable the GPU accelerator in notebook settings")
-        print(f"[env] torch {torch.__version__} | {gpu}")
     except ImportError:
         sys.exit("[env] torch is not installed in this Kaggle image")
+
+    if not torch.cuda.is_available():
+        print(f"[env] torch {torch.__version__} | CPU only — enable the GPU "
+              "accelerator in notebook settings")
+        return
+
+    name = torch.cuda.get_device_name(0)
+    major, minor = torch.cuda.get_device_capability(0)
+    arch = f"sm_{major}{minor}"
+    supported = list(torch.cuda.get_arch_list())
+    print(f"[env] torch {torch.__version__} | {name} ({arch})")
+    if arch not in supported:
+        sys.exit(
+            f"[fatal] {name} is {arch}, which this PyTorch build does not "
+            f"support (it has: {' '.join(supported)}).\n"
+            "        Every CUDA kernel would fail with 'no kernel image is "
+            "available for execution on the device'.\n"
+            "        Fix: notebook settings -> Accelerator -> GPU T4 x2, then "
+            "re-run. The P100 is sm_60 and no\n"
+            "        longer supported by Kaggle's torch build.")
 
 
 # ------------------------------------------------------------------- stages
