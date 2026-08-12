@@ -119,9 +119,17 @@ point. Two model families are built and compared:
 - **Model 2 — MMF-Net** ([`models/model2/`](models/model2/)), graph-free by
   design: periodic per-feature numerical embeddings feeding a transformer over
   the lookback window, cross-feature attention, and a pretrained SAR encoder
-  fused through a learned gate. Built because model 1 loses to a
-  gradient-boosted-tree baseline on PR-AUC (0.742 vs 0.850), which is the known
-  failure of neural networks on tabular data and has a known fix.
+  fused through a learned gate. Built because model 1 lost to a
+  gradient-boosted-tree baseline on PR-AUC (0.742 vs 0.850) — the known failure
+  of neural networks on tabular data, which has a known fix.
+
+**Model 2 wins.** Its headline `N5_bce` reaches PR-AUC **0.8355** against model
+1's 0.7421, at 711k parameters and with no graph at all — closing 87% of the gap
+to the tree baseline and clearing the operational discharge-percentile rule
+(0.8164). Two results carry back: the focal loss is a *defect* rather than a cost
+(swapping it for BCE alone gains +0.0509 PR-AUC and cuts ECE to a third), and the
+Sentinel-1 branch adds nothing once the loss is fixed. Full table and caveats in
+[models/README.md](models/README.md).
 
 Both import [`models/floodlib/`](models/floodlib/) for the data, the loss, the
 metrics and the training loop, so a difference between them is a difference of

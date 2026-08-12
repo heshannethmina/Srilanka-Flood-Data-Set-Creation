@@ -223,12 +223,17 @@ def run(preset: str, presets: Dict[str, Preset], build_model: ModelBuilder, *,
         device_spec: str = "auto", max_far: Optional[float] = None,
         verbose: bool = True, sar_root: Optional[str] = None,
         image_px: Optional[int] = None, batch_size: Optional[int] = None,
-        tag: Optional[str] = None, **model_overrides) -> Dict:
+        tag: Optional[str] = None, train_overrides: Optional[Dict] = None,
+        **model_overrides) -> Dict:
     """Train `preset` from `presets` and write its result JSON.
 
-    `model_overrides` are applied to the model config after the preset, which is
-    how a family exposes its own knobs (e.g. model2's pretrained SAR encoder
-    path) without the engine needing to know they exist.
+    `train_overrides` and `model_overrides` are applied on top of the preset, so
+    a hyperparameter sweep is a sequence of command lines rather than a sequence
+    of edits to `config.py` — which matters because on Kaggle every edit costs a
+    commit, a push and a re-clone.
+
+    When either is non-empty and no explicit `tag` is given, one is derived from
+    the overrides so two points of a sweep cannot overwrite each other.
     """
     p = presets[preset]
     mcfg, tcfg = p.model, p.train
@@ -242,9 +247,27 @@ def run(preset: str, presets: Dict[str, Preset], build_model: ModelBuilder, *,
         tcfg = replace(tcfg, batch_size=batch_size)
     if image_px is not None:
         mcfg = replace(mcfg, image_px=image_px)
-    overrides = {k: v for k, v in model_overrides.items() if v is not None}
-    if overrides:
-        mcfg = replace(mcfg, **overrides)
+
+    tover = {k: v for k, v in (train_overrides or {}).items() if v is not None}
+    if tover:
+        tcfg = replace(tcfg, **tover)
+    # A knob one family has and the other does not (model2's `d_model`, say) is
+    # dropped with a warning rather than raising: a sweep script shared between
+    # the two families should not die on the first irrelevant flag.
+    mover = {k: v for k, v in model_overrides.items() if v is not None}
+    unknown = [k for k in mover if not hasattr(mcfg, k)]
+    if unknown and verbose:
+        print(f"[run] ignoring {unknown}: not a field of "
+              f"{type(mcfg).__name__}")
+    mover = {k: v for k, v in mover.items() if hasattr(mcfg, k)}
+    if mover:
+        mcfg = replace(mcfg, **mover)
+    if tover or mover:
+        shown = ", ".join(f"{k}={v}" for k, v in sorted({**tover, **mover}.items()))
+        if tag is None:
+            tag = auto_tag({**tover, **mover})
+        if verbose:
+            print(f"[run] overrides: {shown}  ->  tag '{tag}'")
 
     device = resolve_device(device_spec)
     print(f"[run] {family} preset {preset} ({p.answers}) | "
@@ -448,6 +471,73 @@ def _events_meta(root: Optional[str] = None) -> Dict[str, Dict]:
 
 # --------------------------------------------------------------------- CLI
 
+#: Flags that override `TrainConfig`. Every family shares this config, so all of
+#: them always apply.
+TRAIN_KNOBS = ("loss", "lr", "weight_decay", "grad_clip", "patience",
+               "focal_alpha", "focal_gamma", "reg_weight", "calibration",
+               "warmup_epochs", "head_weights")
+
+#: Flags that override a model config. Which of these a family actually has
+#: differs — `run` drops the rest with a warning.
+MODEL_KNOBS = ("dropout", "lookback", "d_model", "n_layers", "n_heads",
+               "ff_mult", "d_emb", "n_freq", "freq_sigma", "feature_attn",
+               "fusion_hidden", "fusion_out", "head_hidden", "head_hidden2",
+               "gru_hidden", "gru_layers", "gat_layers", "gat_heads")
+
+
+def auto_tag(overrides: Dict, max_len: int = 48) -> str:
+    """A short filesystem-safe slug naming a sweep point.
+
+    Two runs of the same preset with different hyperparameters are different
+    models and must not share `runs/<preset>_<protocol>.json`. Deriving the tag
+    from the overrides means a sweep cannot silently overwrite itself.
+    """
+    parts = []
+    for k, v in sorted(overrides.items()):
+        if isinstance(v, dict):
+            v = "-".join(f"{a}{b:g}" for a, b in sorted(v.items()))
+        elif isinstance(v, bool):
+            v = "on" if v else "off"
+        elif isinstance(v, float):
+            v = f"{v:g}"
+        short = "".join(w[0] for w in k.split("_")) if "_" in k else k[:6]
+        parts.append(f"{short}{v}")
+    slug = "_".join(parts).replace(".", "p").replace("/", "-")
+    slug = "".join(c for c in slug if c.isalnum() or c in "_-")
+    return slug[:max_len]
+
+
+def parse_head_weights(spec: Optional[str]) -> Optional[Dict[str, float]]:
+    """`"onset_1d=1.0,flood_2d=0.1"` -> a full `head_weights` dict.
+
+    Names may omit the `target_` prefix. Unlisted heads keep their default, so a
+    sweep can move one head without restating the other three.
+    """
+    if not spec:
+        return None
+    out = dict(TrainConfig().head_weights)
+    for item in spec.split(","):
+        if not item.strip():
+            continue
+        k, _, v = item.partition("=")
+        k = k.strip()
+        k = k if k.startswith("target_") else f"target_{k}"
+        if k not in out:
+            raise SystemExit(f"[fatal] unknown head '{k}'; "
+                             f"choose from {sorted(out)}")
+        out[k] = float(v)
+    return out
+
+
+def overrides_from_args(a) -> Tuple[Dict, Dict]:
+    """Split parsed argparse flags into (train overrides, model overrides)."""
+    train = {k: getattr(a, k, None) for k in TRAIN_KNOBS if k != "head_weights"}
+    train["head_weights"] = parse_head_weights(getattr(a, "head_weights", None))
+    model = {k: getattr(a, k, None) for k in MODEL_KNOBS}
+    return ({k: v for k, v in train.items() if v is not None},
+            {k: v for k, v in model.items() if v is not None})
+
+
 def add_common_args(ap) -> None:
     """The argparse flags every family's `train.py` accepts identically."""
     ap.add_argument("--protocol", default=None,
@@ -465,5 +555,46 @@ def add_common_args(ap) -> None:
     ap.add_argument("--batch-size", type=int, default=None)
     ap.add_argument("--tag", default=None,
                     help="suffix for the output filename, so a variant run does "
-                         "not overwrite the canonical one")
+                         "not overwrite the canonical one. Derived from the "
+                         "override flags below when they are used and this is not")
     ap.add_argument("--quiet", action="store_true")
+    add_override_args(ap)
+
+
+def add_override_args(ap) -> None:
+    """Hyperparameter override flags, shared by every entry point.
+
+    Separate from `add_common_args` so `kaggle_run.py`, which has its own
+    parser, offers exactly the same knobs by exactly the same names.
+    """
+    g = ap.add_argument_group(
+        "hyperparameter overrides",
+        "Applied on top of the preset. Any of these makes the run a distinct "
+        "sweep point, written under an auto-derived tag so nothing is "
+        "overwritten. Unset flags keep the preset's value.")
+    g.add_argument("--loss", default=None,
+                   choices=["bce", "wbce", "focal", "focal_conf"])
+    g.add_argument("--lr", type=float, default=None)
+    g.add_argument("--weight-decay", type=float, default=None)
+    g.add_argument("--grad-clip", type=float, default=None)
+    g.add_argument("--patience", type=int, default=None)
+    g.add_argument("--warmup-epochs", type=int, default=None)
+    g.add_argument("--focal-alpha", type=float, default=None)
+    g.add_argument("--focal-gamma", type=float, default=None)
+    g.add_argument("--reg-weight", type=float, default=None,
+                   help="weight on the two auxiliary regression heads")
+    g.add_argument("--head-weights", default=None,
+                   help="e.g. 'onset_1d=1.0,flood_2d=0.1'; unlisted heads keep "
+                        "their default")
+    g.add_argument("--calibration", default=None,
+                   choices=["none", "temperature", "isotonic"])
+    g.add_argument("--dropout", type=float, default=None)
+    g.add_argument("--lookback", type=int, default=None)
+    # Architecture width/depth. A family without one of these ignores it.
+    g.add_argument("--d-model", type=int, default=None, help="model2 only")
+    g.add_argument("--n-layers", type=int, default=None, help="model2 only")
+    g.add_argument("--n-heads", type=int, default=None, help="model2 only")
+    g.add_argument("--d-emb", type=int, default=None, help="model2 only")
+    g.add_argument("--n-freq", type=int, default=None, help="model2 only")
+    g.add_argument("--gru-hidden", type=int, default=None, help="model1 only")
+    g.add_argument("--gat-layers", type=int, default=None, help="model1 only")

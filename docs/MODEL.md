@@ -139,6 +139,18 @@ useless or merely fused badly:
 [models/README.md](../models/README.md); the two open items are the single-seed
 M2 confound and RQ1.
 
-**Model 2** is implemented and verified on synthetic tensors — every preset
-forwards and backwards with all parameters receiving gradients — but **has not
-been trained on the real data**. No N-row exists yet and none should be quoted.
+**Model 2** has been run on the real data (2026-08-10/11, Kaggle T4, ~11 h across
+`ladder2`, `sar2` and `N5_bce`). Its headline `N5_bce` reaches PR-AUC **0.8355**
+against model 1's best of 0.7421 and the gradient-boosted-tree baseline's 0.8496
+— and it does so **without a graph**, which is the comparison model 1 could not
+make because its only per-node reference was a plain GRU.
+
+Two results carry back to model 1. The focal loss is a **defect rather than a
+cost**: swapping it for BCE, changing nothing else, gains +0.0509 PR-AUC and cuts
+ECE to a third, and M4/M5/M6 all sit on that same rung. And the SAR branch adds
+nothing once the loss is fixed — a 711k-parameter model with no imagery beats an
+11,967k-parameter one with it.
+
+Numbers, caveats and the per-seed spread are in
+[models/README.md](../models/README.md). `sar_pretrain` has not yet completed, so
+RQ8 (transferring a pretrained SAR encoder) remains formally untested.

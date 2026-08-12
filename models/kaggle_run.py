@@ -142,7 +142,8 @@ def stage_baselines(root: str) -> Dict:
 
 
 def _ladder(run_fn, root: str, epochs: int, presets: List[str],
-            seeds: Optional[int], label: str, **kw) -> Dict:
+            seeds: Optional[int], label: str, overrides: Optional[Dict] = None,
+            **kw) -> Dict:
     """Run `presets` in order, isolating each step's failure from the rest.
 
     `seeds` overrides the seed count for every step; left as None each preset
@@ -150,13 +151,16 @@ def _ladder(run_fn, root: str, epochs: int, presets: List[str],
     suffix so a re-run cannot clobber the canonical result it is meant to be
     compared against.
     """
-    tag = f"s{seeds}" if seeds is not None else None
+    tover, mover = overrides or ({}, {})
+    # An explicit seed override still needs its own suffix; when hyperparameters
+    # are also overridden, engine.run derives the tag from them instead.
+    tag = f"s{seeds}" if seeds is not None and not (tover or mover) else None
     out = {}
     for preset in presets:
         try:
             out[preset] = run_fn(preset=preset, protocol="temporal", root=root,
                                  out_dir=RUNS, epochs=epochs, n_seeds=seeds,
-                                 tag=tag, **kw)
+                                 tag=tag, train_overrides=tover, **mover, **kw)
         except Exception:
             # The ladder is the longest stage; losing the last rung should not
             # also lose the earlier ones, which are already written to disk.
@@ -166,15 +170,15 @@ def _ladder(run_fn, root: str, epochs: int, presets: List[str],
 
 
 def stage_ladder(root: str, epochs: int, presets: List[str],
-                 seeds: Optional[int]) -> Dict:
+                 seeds: Optional[int], overrides=None) -> Dict:
     from model1.train import run
-    return _ladder(run, root, epochs, presets, seeds, "ladder")
+    return _ladder(run, root, epochs, presets, seeds, "ladder", overrides)
 
 
 def stage_ladder2(root: str, epochs: int, presets: List[str],
-                  seeds: Optional[int]) -> Dict:
+                  seeds: Optional[int], overrides=None) -> Dict:
     from model2.train import run
-    return _ladder(run, root, epochs, presets, seeds, "ladder2")
+    return _ladder(run, root, epochs, presets, seeds, "ladder2", overrides)
 
 
 def stage_leakage(root: str, epochs: int) -> Dict:
@@ -289,7 +293,12 @@ def main() -> None:
                     help="epochs for the sar_pretrain stage")
     ap.add_argument("--batch-size", type=int, default=8,
                     help="M6_cnn / N6_gated only")
+    # The same hyperparameter override flags every train.py accepts, so a sweep
+    # is a sequence of command lines rather than a sequence of config edits.
+    from floodlib import engine
+    engine.add_override_args(ap)
     a = ap.parse_args()
+    overrides = engine.overrides_from_args(a)
 
     from model1.config import PRESETS as P1
     from model2.config import PRESETS as P2
@@ -338,9 +347,9 @@ def main() -> None:
             if name == "baselines":
                 stage_baselines(root)
             elif name == "ladder":
-                stage_ladder(root, a.epochs, presets, a.ladder_seeds)
+                stage_ladder(root, a.epochs, presets, a.ladder_seeds, overrides)
             elif name == "ladder2":
-                stage_ladder2(root, a.epochs, presets2, a.ladder_seeds)
+                stage_ladder2(root, a.epochs, presets2, a.ladder_seeds, overrides)
             elif name == "leakage":
                 stage_leakage(root, a.epochs)
             elif name == "spatial":

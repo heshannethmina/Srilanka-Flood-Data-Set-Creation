@@ -244,36 +244,56 @@ fair, and `--presets M2,M3 --ladder-seeds 5` is the run that fixes it. **RQ1
 (directed flow edges) remains unresolved**: M2→M3 falls on every test metric but
 rises on validation, at n=1 each.
 
-**Model 2** — first full run 2026-08-10, Kaggle T4: `ladder2` 2.45 h, `sar2`
-6.62 h, `sar_pretrain` failed (fixed since — the manifest is not in the Kaggle
-dataset, only in the repo).
+**Model 2** — Kaggle T4, 2026-08-10: `ladder2` 2.45 h, `sar2` 6.62 h; 2026-08-11:
+`N5_bce` 1.61 h.
 
 | Preset | Change | PR-AUC | ev.det | FAR | ECE | params |
 |---|---|---|---|---|---|---|
 | N0 | linear feature embeddings | 0.6083 | 0.290 | 0.412 | 0.0024 | 551k |
 | N1 | **+ periodic (PLR) embeddings** | **0.7605** | 0.420 | 0.325 | 0.0053 | 555k |
 | N2 | + cross-feature attention | 0.7738 | **0.423** | 0.313 | 0.0056 | 693k |
-| N3 | + FiLM terrain | **0.8269** | 0.197 | 0.110 | 0.0032 | 711k |
+| N3 | + FiLM terrain | 0.8269 | 0.197 | 0.110 | 0.0032 | 711k |
 | N4 | + focal × confidence | 0.7592 | 0.220 | 0.138 | 0.0525 | 711k |
-| N5 ×5 | + ensemble + temperature | 0.7846 | 0.208 | 0.145 | 0.0043 | 711k |
+| N5 ×5 | + ensemble + temperature, on focal | 0.7846 | 0.208 | 0.145 | 0.0043 | 711k |
+| **N5_bce ×5** | **the same, on BCE** | **0.8355** | 0.220 | 0.120 | **0.0016** | 711k |
 | N6_scalars ×5 | + SAR scalars | 0.7284 | 0.397 | 0.344 | 0.0055 | 719k |
-| N6_gated ×5 | + gated SAR CNN | **0.8310** | 0.217 | 0.107 | 0.0066 | 11,967k |
+| N6_gated ×5 | + gated SAR CNN | 0.8310 | 0.217 | 0.107 | 0.0066 | 11,967k |
 
-Three findings:
+`N5_bce` is the headline model: best PR-AUC, ECE, Brier (0.0080), CSI (0.561) and
+F1 (0.719) in the project, at 711k parameters. Four findings:
 
 1. **Periodic numerical embeddings are the single largest gain in the project.**
    N0 → N1 changes nothing but the input layer and moves PR-AUC +0.152 and event
    detection +0.130. The tabular-embedding hypothesis holds.
-2. **The gap to gradient-boosted trees is largely closed.** Model 1's best was
-   0.7421 against the GBT's 0.8496 — 0.108 behind. N3 reaches 0.8269 and clears
-   the discharge-percentile rule (0.8164) outright, at 711k parameters.
-3. **The focal rung is a regression, not a gain.** N3 → N4 costs 0.068 PR-AUC and
-   makes calibration 16× worse (ECE 0.0032 → 0.0525); the ensemble in N5 recovers
-   only part of it. `N5_bce` and `N6_gated_bce` apply the ensemble and calibrator
-   to the loss that was actually working, and have not been run yet.
+2. **The focal loss is a defect, not a cost.** N5 → N5_bce changes *only* the
+   loss — same architecture, same 5 seeds, same temperature scaling — and gains
+   **+0.0509 PR-AUC** while cutting ECE to a third. Model 1's whole upper ladder
+   (M4, M5, M6) sits on the same rung, so its published numbers are understated
+   and `M5_bce` is worth running.
+3. **The SAR branch adds nothing.** N5_bce (711k, no imagery) beats N6_gated
+   (11,967k, imagery) outright. What looked like a gain from vision was the BCE
+   loss recovering what focal had destroyed. Imagery has now lost twice on the
+   merits, and it only ever reached 9 of the 51 nodes.
+4. **The gap to gradient-boosted trees is 0.0141** (0.8355 vs 0.8496). Model 1
+   lost by 0.1075, so 87% of it is closed, and N5_bce clears the operational
+   discharge-percentile rule (0.8164) by a clear margin.
 
-**Do not read the `ev.det` column down the ladder** — the thresholds differ
-(FAR ranges 0.107 to 0.412), so it compares operating points rather than models.
-Use [`rethreshold.py`](rethreshold.py) to force a common false-alarm rate first.
+Two caveats. **The top three rows may not be separable**: best validation episode
+PR-AUC varied 0.3375–0.3856 across N5_bce's five seeds, a range of 0.048, so
+0.8355 / 0.8310 / 0.8269 needs the per-seed error bar in `_diag.json` before any
+ordering is claimed. And **do not read the `ev.det` column down the ladder** —
+the thresholds differ (FAR spans 0.107 to 0.412), so it compares operating points
+rather than models; use [`rethreshold.py`](rethreshold.py) first.
 
-Confirmed by this run: imagery covers **9 of 51 nodes**, 2,578 frames.
+From the gradient logging: the clip binds on ~30% of steps early, dips to 4–10%
+after warmup, then climbs to **44–54% past epoch 40**, and seed 3 exhausted the
+60-epoch budget without early stopping. `grad_clip=2.0` and `epochs=80` are the
+cheap things left to try.
+
+**`sar_pretrain` has never completed.** Three bugs, all fixed but not yet re-run:
+the manifest is in the repo rather than the Kaggle dataset; the join used
+`target_date` when Sentinel-1's acquisition almost never lands on it (48 of 2,578
+frames matched); and `image_dataset.csv`'s own `label` column silently shadowed
+the manifest's in the merge.
+
+Confirmed by these runs: imagery covers **9 of 51 nodes**, 2,578 frames.
