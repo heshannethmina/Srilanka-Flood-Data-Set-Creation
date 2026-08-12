@@ -116,10 +116,22 @@ def label_frames(idx: pd.DataFrame, root: Optional[str] = None,
     frames = idx.reset_index(drop=True).copy()
     frames["frame_pos"] = np.arange(len(frames), dtype=np.int64)
     frames["date"] = pd.to_datetime(frames["date"])
+    # image_dataset.csv carries its own `label` and `severity`. Merging the whole
+    # frame table would let pandas silently suffix them to label_x / label_y and
+    # the manifest's labelling — the thing being trained on — would vanish. Only
+    # the three columns the join actually needs are carried through.
+    frames = frames[["site_id", "date", "frame_pos"]]
 
     # Per-node cross product: at ~2.6k frames over 9 nodes against ~3.5k chips
     # this is a few hundred thousand rows, which is nothing.
     pairs = frames.merge(man, how="inner", left_on="site_id", right_on="node_id")
+    if verbose:
+        print(f"[pretrain] {len(pairs)} (frame, chip) pairs share a node code")
+    missing = {"label", "target_date"} - set(pairs.columns)
+    if missing:
+        raise RuntimeError(
+            f"the manifest join lost column(s) {sorted(missing)}. "
+            f"Columns present: {sorted(pairs.columns)}")
     if pairs.empty:
         raise RuntimeError(
             "no frame shares a node code with the manifest. image_dataset.csv's "
