@@ -41,3 +41,11 @@ env/
 Thumbs.db
 .vscode/
 .idea/
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.synctex.gz
+paper/b.log
+paper/build*.log
