@@ -29,6 +29,19 @@ class TrainConfig:
     })
     reg_weight: float = 0.2
 
+    #: Which classification head the run is *scored* on — an index into
+    #: `schema.CLS_HEADS`, where 0 is `target_flood_1d` and 3 is
+    #: `target_onset_1d`. Training still optimises all four heads under
+    #: `head_weights`; this selects only what the metrics, the early-stopping
+    #: signal and the saved `_preds.npz` refer to.
+    #:
+    #: It exists because PR-AUC on `target_flood_1d` is near-saturated by
+    #: discharge autocorrelation — the `discharge_pctl` baseline alone reaches
+    #: 0.816 — so that head measures persistence more than skill. Onset is the
+    #: head on which every baseline actually fails. Defaults to 0, so every
+    #: model 1 and model 2 number already published is reproduced unchanged.
+    eval_head: int = 0
+
     epochs: int = 60
     warmup_epochs: int = 5
     lr: float = 1e-3

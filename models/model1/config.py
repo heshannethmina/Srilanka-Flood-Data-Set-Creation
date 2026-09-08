@@ -82,6 +82,19 @@ PRESETS: Dict[str, Preset] = {
         _m(static_mode="film", graph_mode="both", vision_mode="none"),
         _t(loss="focal_conf", n_seeds=5, calibration="temperature"),
     ),
+    "M5_bce": Preset(
+        # Model 2 established that the focal rung is a defect rather than a
+        # cost: N5 -> N5_bce changes only the loss and gains +0.0509 PR-AUC with
+        # ECE cut to a third. M4, M5 and M6 all sit on that same broken rung, so
+        # model 1's published numbers are understated by roughly that much --
+        # and every "the graph does not help" comparison drawn between M5
+        # (0.7421, focal) and N5_bce (0.8355, BCE) is confounded by it. This
+        # rung is what makes that comparison legitimate. It is a prerequisite
+        # for reading model 3's P-ladder, not an optional extra.
+        "M5_bce", "the M5 ensemble on the loss that actually works",
+        _m(static_mode="film", graph_mode="both", vision_mode="none"),
+        _t(loss="bce", n_seeds=5, calibration="temperature"),
+    ),
     "M6_scalars": Preset(
         "M6_scalars", "RQ5 — SAR scalar features appended to the dynamic stream",
         _m(static_mode="film", graph_mode="both", vision_mode="scalars"),

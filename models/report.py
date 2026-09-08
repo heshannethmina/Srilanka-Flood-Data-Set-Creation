@@ -12,9 +12,14 @@ Files it understands, all written by `kaggle_run.py`:
   <preset>_<protocol>.json    one model, e.g. M2_temporal.json or N5_temporal.json
   <preset>_<protocol>_s5.json a re-run at an overridden seed count
 
-Rows are grouped baselines → model 1 → model 2, because the baselines are the
-bar and the two families have to be read against it before they are read against
-each other.
+Rows are grouped baselines → model 1 → model 2 → model 3, because the baselines
+are the bar and the three families have to be read against it before they are
+read against each other.
+
+This prints *what each model scored*. For the document you make decisions and
+paper claims from — seed error bars, paired confidence intervals on the
+differences, and event detection at a matched false-alarm ratio — use
+`results_doc.py` instead.
 """
 from __future__ import annotations
 
@@ -44,7 +49,19 @@ COUNT_COLUMNS = [
 #: ASCII only: this table is printed to Kaggle logs and to Windows consoles,
 #: and a cp1252 terminal turns an em dash into a replacement character.
 GROUPS = [("baselines", "BASELINES"), ("model1", "MODEL 1: TF-STGNN"),
-          ("model2", "MODEL 2: MMF-Net")]
+          ("model2", "MODEL 2: MMF-Net"), ("model3", "MODEL 3: STG-Former")]
+
+#: Short names for `TrainConfig.eval_head`, mirroring `floodlib.schema.CLS_HEADS`.
+#: Duplicated rather than imported on purpose: this file is run against a
+#: downloaded `runs/` directory from wherever it happens to be, with no
+#: guarantee that `models/` is on the path.
+_HEADS = ["flood_1d", "flood_2d", "flood_3d", "onset_1d"]
+
+#: Model-name column width. Wide enough for the longest preset plus a
+#: seed count and an eval-head marker ("P4_onset_ctrl x5 [onset_1d]"),
+#: because a truncated marker is worse than none -- it hides that the row
+#: is scored on a different target.
+_MODEL_W = 30
 
 
 def _group_of(d: Dict) -> str:
@@ -56,8 +73,13 @@ def _group_of(d: Dict) -> str:
     """
     fam = d.get("family", "")
     if fam:
+        if "STG-Former" in fam:
+            return "model3"
         return "model2" if "MMF" in fam else "model1"
-    return "model2" if str(d.get("preset", "")).startswith("N") else "model1"
+    p = str(d.get("preset", ""))
+    if p.startswith("P"):
+        return "model3"
+    return "model2" if p.startswith("N") else "model1"
 
 
 def collect(run_dir: str, protocol: Optional[str] = None) -> List[Dict]:
@@ -77,6 +99,13 @@ def collect(run_dir: str, protocol: Optional[str] = None) -> List[Dict]:
             # A 5-seed run and a 1-seed run of the same preset are different
             # models; the label has to say so or the table silently conflates them.
             label = d["preset"] + (f" x{n}" if n and n > 1 else "")
+            # A row scored on onset and a row scored on flood_1d share the
+            # PR-AUC column but are not comparable in it -- onset is far sparser
+            # and its numbers are much smaller. Mark it in the label so the two
+            # cannot be read down the same column by accident.
+            eh = d.get("train_config", {}).get("eval_head", 0)
+            if eh:
+                label += f" [{_HEADS[eh]}]"
             rows.append({"model": label, "protocol": d["protocol"],
                          "group": _group_of(d),
                          "n_params": d.get("n_params"), **d["test"]})
@@ -92,9 +121,9 @@ def _fmt_params(v) -> str:
 def render(rows: List[Dict], title: str = "FLOOD EARLY-WARNING EVALUATION SUMMARY",
            show_params: bool = True, show_counts: bool = False) -> str:
     counts = COUNT_COLUMNS if show_counts else []
-    width = (20 + 11 + sum(w for _, _, w, _ in COLUMNS)
+    width = (_MODEL_W + 11 + sum(w for _, _, w, _ in COLUMNS)
              + sum(w for _, _, w in counts) + (8 if show_params else 0))
-    header = (f"{'Model':<20s}{'Protocol':<11s}"
+    header = (f"{'Model':<{_MODEL_W}s}{'Protocol':<11s}"
               + "".join(f"{h:>{w}s}" for _, h, w, _ in COLUMNS)
               + "".join(f"{h:>{w}s}" for _, h, w in counts)
               + (f"{'params':>8s}" if show_params else ""))
@@ -110,7 +139,8 @@ def render(rows: List[Dict], title: str = "FLOOD EARLY-WARNING EVALUATION SUMMAR
             out.append("")
         out.append(f"-- {heading} " + "-" * max(width - len(heading) - 4, 0))
         for r in sorted(block, key=lambda r: (r["protocol"], r["model"])):
-            line = f"{r['model'][:19]:<20s}{r['protocol'][:10]:<11s}"
+            line = (f"{r['model'][:_MODEL_W - 1]:<{_MODEL_W}s}"
+                    f"{r['protocol'][:10]:<11s}")
             for key, _, w, dec in COLUMNS:
                 v = r.get(key)
                 # A baseline with no event metrics must read as absent, not zero.

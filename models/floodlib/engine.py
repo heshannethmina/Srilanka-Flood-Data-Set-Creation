@@ -34,7 +34,7 @@ from .data import Panel, SnapshotBatcher, build_panel, load_panel
 from .graph import build_graph
 from .losses import MultiHeadLoss
 from .metrics import best_threshold, evaluate
-from .schema import BaseModelConfig
+from .schema import CLS_HEADS, BaseModelConfig
 from .traincfg import Preset, TrainConfig
 
 #: A family's factory: (model config, graph or None) → an nn.Module whose
@@ -73,8 +73,14 @@ def _image_inputs(b: Dict, store, px: int, device: torch.device):
 
 @torch.no_grad()
 def collect(model: nn.Module, batcher: SnapshotBatcher, S: torch.Tensor,
-            device: torch.device, px: int, store=None) -> Dict[str, np.ndarray]:
-    """Run the model over a split and flatten to 1-D arrays of valid node-days."""
+            device: torch.device, px: int, store=None,
+            head: int = 0) -> Dict[str, np.ndarray]:
+    """Run the model over a split and flatten to 1-D arrays of valid node-days.
+
+    `head` indexes `schema.CLS_HEADS` and selects which head is scored — see
+    `TrainConfig.eval_head`. It is read from both the logits and the labels, so
+    the two can never fall out of step.
+    """
     model.eval()
     logits, ys, days, nodes, events = [], [], [], [], []
     for b in batcher:
@@ -82,9 +88,9 @@ def collect(model: nn.Module, batcher: SnapshotBatcher, S: torch.Tensor,
         img, ipos, imask, age = _image_inputs(b, store, px, device)
         out = model(x, S, img, ipos, imask, age)
         m = b["mask"] > 0                                   # [B, N]
-        lg = out["logits"][..., 0].detach().cpu().numpy()
+        lg = out["logits"][..., head].detach().cpu().numpy()
         logits.append(lg[m])
-        ys.append(b["y"][..., 0][m])
+        ys.append(b["y"][..., head][m])
         events.append(b["event"][m])
         d = np.repeat(b["days"][:, None], m.shape[1], axis=1)
         n = np.repeat(np.arange(m.shape[1])[None, :], m.shape[0], axis=0)
@@ -171,7 +177,7 @@ def train_one(build_model: ModelBuilder, panel: Panel, mcfg: BaseModelConfig,
             nb += 1
         sched.step()
 
-        vp = collect(model, va, S, device, px, store)
+        vp = collect(model, va, S, device, px, store, tcfg.eval_head)
         vm = evaluate(vp["y"], 1 / (1 + np.exp(-vp["logit"])), 0.5,
                       vp["event"], vp["day"], vp["node"])
         score = vm.get("event_pr_auc", np.nan)
@@ -210,8 +216,8 @@ def train_one(build_model: ModelBuilder, panel: Panel, mcfg: BaseModelConfig,
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    return (model, collect(model, va, S, device, px, store),
-            collect(model, te, S, device, px, store), history)
+    return (model, collect(model, va, S, device, px, store, tcfg.eval_head),
+            collect(model, te, S, device, px, store, tcfg.eval_head), history)
 
 
 # ------------------------------------------------------------------ pipeline
@@ -270,8 +276,9 @@ def run(preset: str, presets: Dict[str, Preset], build_model: ModelBuilder, *,
             print(f"[run] overrides: {shown}  ->  tag '{tag}'")
 
     device = resolve_device(device_spec)
+    scored = CLS_HEADS[tcfg.eval_head]
     print(f"[run] {family} preset {preset} ({p.answers}) | "
-          f"protocol {tcfg.protocol} | {device}")
+          f"protocol {tcfg.protocol} | scored on {scored} | {device}")
 
     df, nodes, edges = load_panel(root)
     panel = build_panel(df, nodes, truncate_after=tcfg.truncate_after)
@@ -475,7 +482,7 @@ def _events_meta(root: Optional[str] = None) -> Dict[str, Dict]:
 #: them always apply.
 TRAIN_KNOBS = ("loss", "lr", "weight_decay", "grad_clip", "patience",
                "focal_alpha", "focal_gamma", "reg_weight", "calibration",
-               "warmup_epochs", "head_weights")
+               "warmup_epochs", "head_weights", "eval_head")
 
 #: Flags that override a model config. Which of these a family actually has
 #: differs — `run` drops the rest with a warning.
@@ -586,6 +593,10 @@ def add_override_args(ap) -> None:
     g.add_argument("--head-weights", default=None,
                    help="e.g. 'onset_1d=1.0,flood_2d=0.1'; unlisted heads keep "
                         "their default")
+    g.add_argument("--eval-head", type=int, default=None, choices=[0, 1, 2, 3],
+                   help="which CLS head is scored: 0=flood_1d (default), "
+                        "1=flood_2d, 2=flood_3d, 3=onset_1d. Changes the "
+                        "metrics and the early-stopping target, not the loss")
     g.add_argument("--calibration", default=None,
                    choices=["none", "temperature", "isotonic"])
     g.add_argument("--dropout", type=float, default=None)

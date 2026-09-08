@@ -5,8 +5,10 @@ Implementation of the model specified in [PROJECT_PROPOSAL.md](PROJECT_PROPOSAL.
 
 This document describes **model 1**. A second family, **model 2 (MMF-Net)**, is a
 graph-free multimodal transformer built to answer what model 1's results left
-open — see the module map at the end and
-[models/README.md](../models/README.md) for the comparison.
+open; a third, **model 3 (STG-Former)**, combines model 2's input layer with
+model 1's graph so that RQ1 can be answered at all. See the module map at the
+end and [models/README.md](../models/README.md) for the comparison, and
+[RESULTS.md](RESULTS.md) for what has actually been measured.
 
 Code lives in [models/](../models/) — deliberately separate from
 [scripts/](../scripts/), which creates the datasets. The two have no shared entry
@@ -132,6 +134,26 @@ useless or merely fused badly:
 | [model2/train.py](../models/model2/train.py) | preset table + model factory |
 | [model2/pretrain_sar.py](../models/model2/pretrain_sar.py) | chip-level SAR encoder pretraining on `image_manifest.csv` |
 
+Model 3 — model 2's encoder with model 1's graph, and no layers of its own. It
+exists because RQ1 cannot be answered from the first two: the standing "graph
+versus no graph" comparison (M5 against N5_bce) varies the encoder, the loss and
+the data extent simultaneously. Model 3 varies only the graph:
+
+| File | Contents |
+|---|---|
+| [model3/config.py](../models/model3/config.py) | `STGFConfig`, the P0–P4 presets, the onset head weighting |
+| [model3/model.py](../models/model3/model.py) | the assembly; `P0` is byte-identical to model 2's `N3` |
+| [model3/train.py](../models/model3/train.py) | preset table + model factory |
+
+**Which head is scored is now a knob.** `TrainConfig.eval_head` (CLI:
+`--eval-head`) selects which of the four classification heads the metrics, the
+early-stopping signal and the saved predictions refer to. It defaults to 0
+(`target_flood_1d`), so every published model 1 and model 2 number is reproduced
+unchanged. Model 3's `P4_onset` rung sets it to 3 (`target_onset_1d`), because
+PR-AUC on the 1-day flood target is near-saturated by discharge autocorrelation
+— the `discharge_pctl` baseline alone reaches 0.816 — while onset is the head on
+which every baseline actually fails.
+
 ## Status
 
 **Model 1** has been run end to end on the real data (2026-08-02, Kaggle T4,
@@ -154,3 +176,14 @@ nothing once the loss is fixed — a 711k-parameter model with no imagery beats 
 Numbers, caveats and the per-seed spread are in
 [models/README.md](../models/README.md). `sar_pretrain` has not yet completed, so
 RQ8 (transferring a pretrained SAR encoder) remains formally untested.
+
+**Model 3** is implemented and smoke-tested but **has not been run on the real
+data**. Its `P0` rung is verified byte-identical to model 2's `N3` (same 710,870
+parameters, same weights at seed 0, identical forward pass), which is the
+control the rest of its ladder is read against. Run it with
+`--stage ladder3`, then regenerate [RESULTS.md](RESULTS.md).
+
+The conclusion carried back from model 2 that **the SAR branch adds nothing** is
+why model 3's default ladder has no imagery rung. The conclusion that the graph
+adds nothing is *not* carried back, because it was never established — see
+RESULTS.md §2.
