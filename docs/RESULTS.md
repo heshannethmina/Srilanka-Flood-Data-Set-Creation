@@ -125,6 +125,18 @@ layer and moves PR-AUC +0.152, the largest single-change gain anywhere in the
 project — larger than FiLM's +0.105. Supports Gorishniy et al. (NeurIPS 2022) on
 a real hydrological panel.
 
+**4b. The Sri Lankan literature demonstrates the same problem independently.**
+Verified by reading the papers ([SRI_LANKA_LITERATURE.md](SRI_LANKA_LITERATURE.md)):
+the closest local competitor (Saubhagya et al., *Forecasting* 7(2):29, 2025)
+reports "80%, 80%, 100% accuracy" computed on **five events in total**, and its
+overall accuracy sits *below* the majority-class rate in every year but one;
+Thilakarathne & Premachandra (SLAAI 2017) headline "91.7% accuracy" while their
+own table reports **mean recall 0.404** with two of ten folds detecting nothing.
+This turns your evaluation argument from an assertion into a documented pattern.
+_Caveat: Saubhagya et al. use a correct expanding-window temporal split — the
+problem there is evidence-base size and metric choice, not leakage. Do not
+conflate the two._
+
 **5. SAR imagery does not help at a 1-day horizon.** Two independent nulls
 (M6_cnn; N6_gated at 17× the parameters scoring *below* N5_bce).
 _Caveat: this is a coverage result — 9 of 51 nodes, ~12-day revisit against a
