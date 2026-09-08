@@ -1,0 +1,10 @@
+preset,description,objective,seeds,temperature_scaling,ap,ece,brier,far,event_detection,params_million_per_member
+N0,Linear embeddings,bce,1,false,0.6083,0.0024,,0.412,0.290,0.551
+N1,PLR embeddings,bce,1,false,0.7605,0.0053,,0.325,0.420,0.555
+N2,Feature attention,bce,1,false,0.7738,0.0056,,0.313,0.423,0.693
+N3,Static FiLM,bce,1,false,0.8269,0.0032,,0.110,0.197,0.711
+N4,Focal and confidence,focal_conf,1,false,0.7592,0.0525,,0.138,0.220,0.711
+N5,Focal ensemble,focal_conf,5,true,0.7846,0.0043,,0.145,0.208,0.711
+N5_bce,BCE ensemble,bce,5,true,0.8355,0.0016,0.0080,0.120,0.220,0.711
+N6_scalars,SAR scalars,focal_conf,5,true,0.7284,0.0055,,0.344,0.397,0.719
+N6_gated,Gated SAR CNN,focal_conf,5,true,0.8310,0.0066,,0.107,0.217,11.967
