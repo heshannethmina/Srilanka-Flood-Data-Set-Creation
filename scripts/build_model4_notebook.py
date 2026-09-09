@@ -11,6 +11,7 @@ if '__file__' not in globals():
     raise RuntimeError(
         'This is the repository notebook builder, not the Kaggle training notebook. '
         'Import notebooks/tfstgnn_kaggle.ipynb into Kaggle and Run All. '
+        'Alternatively, paste the entire notebooks/model4_kaggle.py file into one Kaggle cell. '
         'Do not paste scripts/build_model4_notebook.py into a notebook cell.'
     )
 
@@ -209,6 +210,19 @@ def build():
     path=ROOT/'notebooks/tfstgnn_kaggle.ipynb'
     path.write_text(json.dumps(notebook,indent=1,ensure_ascii=False)+'\n',encoding='utf-8')
     print(path)
+    # The same executable cells as a single pasteable Python file. Embedded
+    # modules are written to disk before import, so their __file__ is defined
+    # by Python; the outer notebook cell never relies on __file__.
+    standalone = (
+        '# MODEL 4: PASTE THIS ENTIRE FILE INTO ONE KAGGLE CODE CELL AND RUN.\n'
+        '# Enable GPU and Internet. No repository clone or code edits needed.\n'
+        '# Generated from the exact training notebook by build_model4_notebook.py.\n\n'
+        + '\n\n'.join(''.join(c['source']) for c in notebook['cells'] if c['cell_type']=='code')
+        + '\n'
+    )
+    script = ROOT/'notebooks/model4_kaggle.py'
+    script.write_text(standalone,encoding='utf-8')
+    print(script)
 
 
 if __name__=='__main__':

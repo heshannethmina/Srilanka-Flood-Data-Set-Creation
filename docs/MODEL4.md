@@ -5,6 +5,13 @@ a GPU, and Run All. Enable Internet when the public tabular dataset is not
 attached or a required package is absent. No notebook code edits, GitHub push,
 repository clone, private credentials, or SAR dataset are needed.
 
+If you prefer pasting code, copy the **entire**
+[`notebooks/model4_kaggle.py`](../notebooks/model4_kaggle.py) file into one empty
+Kaggle code cell and run it. It contains the same executable code as the notebook.
+Replace the old generator cell; pushing GitHub changes does not update a cell
+you already pasted into Kaggle. `scripts/build_model4_notebook.py` is only the
+local packaging tool and must not be pasted into Kaggle.
+
 ## Why this candidate
 
 Recorded Model 2/N5 BCE AP is 0.8355, compared with LightGBM 0.8496. Model 3/P3
