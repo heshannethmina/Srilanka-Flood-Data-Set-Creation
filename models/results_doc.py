@@ -267,12 +267,28 @@ def early_warning_table(runs: Dict[str, Dict], far: float) -> List[str]:
     return out
 
 
+def _resolve(runs: Dict[str, Dict], name: str) -> Optional[Dict]:
+    """Look a contrast name up, tolerating the ` [head]` suffix on the label.
+
+    `load_runs` appends the scored head to a run's label whenever it is not
+    `flood_1d`, so the onset pair registers as `P4_onset x5 [onset_1d]`. A
+    contrast declared as `P4_onset x5` would then silently report "has not been
+    run" for a run that is sitting in the directory — the worst possible failure
+    for a decision document, because it looks like missing evidence rather than
+    a lookup bug. Match the bare label too, and only when it is unambiguous.
+    """
+    if name in runs:
+        return runs[name]
+    hits = [r for k, r in runs.items() if k.split(" [")[0] == name]
+    return hits[0] if len(hits) == 1 else None
+
+
 def contrast_section(runs: Dict[str, Dict], n_boot: int) -> Tuple[List[str], List[str]]:
     """The decision engine. Returns (rendered lines, missing-run notes)."""
     lines: List[str] = []
     missing: List[str] = []
     for a_name, b_name, question in CONTRASTS:
-        a, b = runs.get(a_name), runs.get(b_name)
+        a, b = _resolve(runs, a_name), _resolve(runs, b_name)
         lines.append(f"\n#### {a_name}  −  {b_name}\n")
         lines.append(f"{question}\n")
         if a is None or b is None:
