@@ -66,7 +66,17 @@ moving part:
 Its `P3 − P0_x5` contrast holds encoder, loss, panel, seed count and calibrator
 fixed. That interval is the RQ1 answer; nothing already run is.
 
-## Running it — Kaggle
+## Model 4 — ready-to-run follow-up
+
+[The Kaggle notebook](../notebooks/tfstgnn_kaggle.ipynb) now runs **Hydro-TEM**,
+a graph-free temporal neural ensemble, alongside a freshly trained Model 2
+architecture control and matched baselines. It embeds all required code and
+automatically finds or downloads the public tabular dataset. Import it, enable
+a GPU (and Internet if downloading), and Run All without editing code.
+See [Model 4's design and evaluation contract](../docs/MODEL4.md).
+Model 4 has no measured result yet. The older CLI stages below remain available.
+
+## Running Models 1–3 — Kaggle
 
 [`kaggle_run.py`](kaggle_run.py) is the only entry point and it **only runs on
 Kaggle**. It exits immediately anywhere else.
@@ -90,12 +100,12 @@ Kaggle**. It exits immediately anywhere else.
 !python /kaggle/working/repo/models/kaggle_run.py --stage ladder2
 ```
 
-## Save & Run All
+## Earlier CLI batch workflow (Models 1–3)
 
-[`../notebooks/tfstgnn_kaggle.ipynb`](../notebooks/tfstgnn_kaggle.ipynb) is a
-ready-made notebook for batch execution: import it on Kaggle
-(**File → Import Notebook**), attach the two datasets, set the accelerator to GPU
-and internet to On, then **Save & Run All (Commit)**.
+The shared CLI supports batch execution with `--stage all`. The current
+[`notebook`](../notebooks/tfstgnn_kaggle.ipynb) instead packages Model 4's dedicated
+experiment; the following fault isolation and stage descriptions apply to the
+older CLI runner.
 
 Two properties make that safe to leave unattended:
 

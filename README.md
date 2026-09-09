@@ -108,6 +108,13 @@ Full details: [docs/IMAGE_DATASET.md](docs/IMAGE_DATASET.md).
 
 ## The models
 
+**New: Model 4 — Hydro-TEM.** The [ready-to-run Kaggle notebook](notebooks/tfstgnn_kaggle.ipynb)
+now embeds the full Model 4 experiment, a freshly trained Model 2 control, and
+matched baselines. Import it, enable a GPU, and Run All; the notebook locates
+or downloads the public tabular dataset without code edits. Internet is needed
+if downloading. See [the design and evaluation protocol](docs/MODEL4.md).
+Model 4's predictive performance is pending the Kaggle run.
+
 Dataset creation ([`scripts/`](scripts/)) and model creation
 ([`models/`](models/)) are kept in separate directories with no shared entry
 point. Two model families are built and compared:
