@@ -223,3 +223,90 @@ def test_model4_runner_packages_outputs_even_on_failure(tmp_path,monkeypatch,fai
         assert 'runs/model4/source/models/example.py' in archive.namelist()
         if fail:
             assert 'simulated training failure' in archive.read('runs/model4/failure.txt').decode()
+
+
+def test_real_grad_scaler_skips_overflow_before_clipping():
+    model=torch.nn.Linear(1,1,bias=False)
+    optimizer=torch.optim.SGD(model.parameters(),lr=.1,momentum=.9)
+    scaler=torch.amp.GradScaler('cpu',init_scale=128.)
+    scaler.scale(model(torch.ones(1,1)).sum()).backward()
+    model.weight.grad.fill_(float('inf'))
+    before=model.weight.detach().clone()
+    assert not workflow.safe_optimizer_step(model,optimizer,scaler,2.)
+    torch.testing.assert_close(model.weight,before,rtol=0,atol=0)
+    assert scaler.get_scale()==64. and not optimizer.state
+    scaler.scale(model(torch.ones(1,1)).sum()).backward()
+    assert workflow.safe_optimizer_step(model,optimizer,scaler,2.)
+    assert not torch.equal(model.weight,before) and optimizer.state
+
+
+@pytest.mark.parametrize('bad_attempts',[1,3,4])
+def test_batch_retries_are_bounded_and_fallback_to_fp32(bad_attempts):
+    class Tiny(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight=torch.nn.Parameter(torch.tensor(0.))
+            self._amp_enabled=True
+            self.calls=0
+            self.weight.register_hook(self.inject_overflow)
+        def inject_overflow(self,gradient):
+            return torch.full_like(gradient,float('inf')) if self.calls<=bad_attempts else gradient
+        def forward(self,x,s,state):
+            self.calls+=1
+            return self.weight.sigmoid().expand(len(x),1,4)
+    model=Tiny()
+    optimizer=torch.optim.AdamW(model.parameters(),lr=.01)
+    scaler=torch.amp.GradScaler('cpu',init_scale=128.)
+    x=torch.ones(2,2,1); s=torch.ones(2,1); state=torch.zeros(2); y=torch.zeros(2,4)
+    if bad_attempts==4:
+        with pytest.raises(FloatingPointError,match='full precision'):
+            workflow.train_batch(model,optimizer,scaler,x,s,state,y,2.)
+        assert model.calls==4 and model.weight.item()==0. and not optimizer.state
+    else:
+        loss,scaler,retries=workflow.train_batch(model,optimizer,scaler,x,s,state,y,2.)
+        assert np.isfinite(loss) and model.weight.item()<0.
+        assert retries==bad_attempts and model.calls==bad_attempts+1
+        assert int(optimizer.state[model.weight]['step'])==1
+        assert model._amp_enabled==(bad_attempts<3)
+        assert scaler.is_enabled()==model._amp_enabled
+
+
+def test_legacy_checkpoint_resume_and_precision_mode(source,cfg,tmp_path):
+    data=prepare(*source,cfg)
+    model,_=fit_seed('model4',0,data,cfg,tmp_path,time.monotonic()+120,torch.device('cpu'))
+    path=tmp_path/'model4_seed0.pt'
+    saved=torch.load(path,weights_only=False)
+    saved.pop('amp_enabled')  # exact pre-fix checkpoint field set
+    torch.save(saved,path)
+    restored,_=fit_seed('model4',0,data,cfg,tmp_path,time.monotonic()+120,torch.device('cpu'))
+    assert not restored._amp_enabled
+    for k,v in model.state_dict().items():
+        torch.testing.assert_close(v,restored.state_dict()[k],rtol=0,atol=0)
+    saved['state'][next(k for k,v in saved['state'].items() if v.is_floating_point())].fill_(float('nan'))
+    torch.save(saved,path)
+    with pytest.raises(FloatingPointError,match='refusing resume'):
+        fit_seed('model4',0,data,cfg,tmp_path,time.monotonic()+120,torch.device('cpu'))
+
+
+@pytest.mark.parametrize('changed',['none','config','data','other_code','unknown_version','predictions','complete'])
+def test_only_known_unfinished_run_can_migrate(tmp_path,changed):
+    current=dict(config={'seeds':(0,1,2),'epochs':80},data_sha256='data',nodes_sha256='nodes',
+                 source_sha256={'model4/workflow.py':'new','model2/model.py':'unchanged'})
+    previous=json.loads(json.dumps(current))
+    previous['source_sha256']['model4/workflow.py']=workflow.PRE_AMP_FIX_SHA256
+    previous['signature']='previous'
+    if changed=='config': previous['config']['epochs']=60
+    if changed=='data': previous['data_sha256']='different'
+    if changed=='other_code': previous['source_sha256']['model2/model.py']='different'
+    if changed=='unknown_version': previous['source_sha256']['model4/workflow.py']='unrecognised'
+    if changed=='predictions': (tmp_path/'model2_control_seed0_predictions.npz').touch()
+    if changed=='complete': (tmp_path/'status.json').write_text('{"complete": true}')
+    (tmp_path/'manifest.json').write_text(json.dumps(previous))
+    if changed!='none':
+        with pytest.raises(ValueError,match='different dataset/code/config'):
+            workflow.verify_resume_manifest(tmp_path,current,'new-signature')
+        assert not (tmp_path/'manifest_before_amp_fix.json').exists()
+    else:
+        migrations=workflow.verify_resume_manifest(tmp_path,current,'new-signature')
+        assert len(migrations)==1 and migrations[0]['from_signature']=='previous'
+        assert json.loads((tmp_path/'manifest_before_amp_fix.json').read_text())==previous

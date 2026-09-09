@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import platform
 import random
+import shutil
 import time
 from dataclasses import asdict, dataclass
 
@@ -268,7 +269,8 @@ class Model2Control(nn.Module):
         # Existing network uses [snapshot, time, node, feature]; nodes are
         # independent with graph disabled, so one snapshot is equivalent.
         out = self.net(x.permute(1,0,2).unsqueeze(0), s)
-        return out['logits'].squeeze(0).sigmoid().unsqueeze(1)
+        # Probability-space BCE needs the sigmoid backward in float32 as well.
+        return out['logits'].float().squeeze(0).sigmoid().unsqueeze(1)
 
 
 def build_model(name, data, cfg):
@@ -298,14 +300,69 @@ def objective(p,y):
     return (losses*losses.new_tensor([1.,.3,.3,.5])).sum(-1).mean()
 
 
+def safe_optimizer_step(model, opt, scaler, grad_clip):
+    """Let GradScaler recover from overflow without applying invalid gradients.
+
+    Check before clipping: clipping infinity can turn gradients into NaNs.
+    GradScaler already recorded non-finite gradients during unscale_, so its
+    step skips the optimizer and update lowers the scale. FP32 errors remain
+    fatal. A false return asks the caller to retry this same batch.
+    """
+    scaler.unscale_(opt)
+    parameters = [p for p in model.parameters() if p.grad is not None]
+    finite = torch.stack([torch.isfinite(p.grad).all() for p in parameters]).all()
+    if not bool(finite):
+        if not scaler.is_enabled():
+            opt.zero_grad(set_to_none=True)
+            raise FloatingPointError('Non-finite gradients in full precision; refusing optimizer update.')
+        scaler.step(opt)  # unscale_ found inf/NaN: this MUST skip optimizer.step
+        scaler.update()
+        opt.zero_grad(set_to_none=True)
+        return False
+    torch.nn.utils.clip_grad_norm_(parameters, grad_clip, error_if_nonfinite=True)
+    scaler.step(opt)
+    scaler.update()
+    return True
+
+
+def train_batch(model, opt, scaler, x, s, state, y, grad_clip):
+    """Retry AMP overflows; after three attempts, keep this seed in FP32."""
+    recovered = 0
+    while True:
+        opt.zero_grad(set_to_none=True)
+        amp = getattr(model, '_amp_enabled', x.device.type == 'cuda')
+        with torch.autocast(device_type=x.device.type, enabled=amp):
+            p = model(x,s,state)
+        if not bool(torch.isfinite(p).all()):
+            if not amp:
+                raise FloatingPointError('Non-finite predictions in full precision.')
+            model._amp_enabled = False
+            scaler = torch.amp.GradScaler(x.device.type, enabled=False)
+            recovered += 1
+            continue
+        loss = objective(p,y)
+        if not bool(torch.isfinite(loss)):
+            raise FloatingPointError('Non-finite float32 BCE loss.')
+        scaler.scale(loss).backward()
+        if safe_optimizer_step(model,opt,scaler,grad_clip):
+            return float(loss.detach()), scaler, recovered
+        recovered += 1
+        if recovered >= 3:
+            model._amp_enabled = False
+            scaler = torch.amp.GradScaler(x.device.type, enabled=False)
+
+
 @torch.no_grad()
 def predict(model,data,idx,cfg,device):
     model.eval()
     result = []
     for start in range(0,len(idx),cfg.batch_size):
         x,s,state,_ = arrays_at(data,idx[start:start+cfg.batch_size],cfg,device)
-        with torch.autocast(device_type=device.type, enabled=device.type=='cuda'):
+        with torch.autocast(device_type=device.type,
+                            enabled=getattr(model, '_amp_enabled', device.type=='cuda')):
             p = model(x,s,state)
+        if not bool(torch.isfinite(p).all()):
+            raise FloatingPointError('Non-finite evaluation probabilities; no metrics will be published.')
         result.append(p.float().mean(1).cpu().numpy())
     return np.concatenate(result)
 
@@ -322,16 +379,24 @@ def fit_seed(name,seed,data,cfg,out,deadline,device):
     seed_all(seed)
     checkpoint = out/f'{name}_seed{seed}.pt'
     model = build_model(name,data,cfg).to(device)
+    model._amp_enabled = device.type=='cuda'
     opt = torch.optim.AdamW(model.parameters(),lr=cfg.lr,weight_decay=cfg.weight_decay)
     scaler = torch.amp.GradScaler('cuda',enabled=device.type=='cuda')
     start,best,bad,history,best_state = 0,-np.inf,0,[],None
     if checkpoint.exists():
         saved = torch.load(checkpoint,map_location='cpu',weights_only=False)
+        for key in ['state','best_state']:
+            if any(not bool(torch.isfinite(v).all()) for v in saved[key].values()
+                   if torch.is_floating_point(v)):
+                raise FloatingPointError(f'Checkpoint {checkpoint.name} has non-finite {key}; refusing resume.')
+        model._amp_enabled = saved.get('amp_enabled', device.type=='cuda') and device.type=='cuda'
+        scaler = torch.amp.GradScaler(device.type,enabled=model._amp_enabled)
         if saved['complete']:
             model.load_state_dict(saved['best_state'])
             return model, saved['history']
         model.load_state_dict(saved['state']); opt.load_state_dict(saved['optimizer'])
-        scaler.load_state_dict(saved['scaler'])
+        if scaler.is_enabled() and saved['scaler']:
+            scaler.load_state_dict(saved['scaler'])
         start,best,bad,history,best_state = (saved[k] for k in ['epoch','best','bad','history','best_state'])
         torch.set_rng_state(saved['rng'])
         np.random.set_state(saved['numpy_rng']); random.setstate(saved['python_rng'])
@@ -350,23 +415,19 @@ def fit_seed(name,seed,data,cfg,out,deadline,device):
             group['lr']=lr
         model.train()
         shuffled = train_idx[np.random.permutation(len(train_idx))]
-        total,seen = 0.,0
+        total,seen,overflows = 0.,0,0
+        amp_at_start = model._amp_enabled
         for i in range(0,len(shuffled),cfg.batch_size):
             if time.monotonic() >= deadline-30:
                 raise BudgetExpired(name)
             idx = shuffled[i:i+cfg.batch_size]
             x,s,state,y = arrays_at(data,idx,cfg,device)
-            opt.zero_grad(set_to_none=True)
-            with torch.autocast(device_type=device.type, enabled=device.type=='cuda'):
-                p = model(x,s,state)
-            loss = objective(p,y)
-            if not torch.isfinite(loss):
-                raise FloatingPointError(f'{name} seed {seed}: nonfinite loss')
-            scaler.scale(loss).backward()
-            scaler.unscale_(opt)
-            torch.nn.utils.clip_grad_norm_(model.parameters(),cfg.grad_clip,error_if_nonfinite=True)
-            scaler.step(opt); scaler.update()
-            total += float(loss.detach())*len(idx); seen += len(idx)
+            loss,scaler,recovered = train_batch(model,opt,scaler,x,s,state,y,cfg.grad_clip)
+            overflows += recovered
+            total += loss*len(idx); seen += len(idx)
+        if overflows:
+            print(f'[precision] {name} seed={seed}: recovered {overflows} overflow attempt(s); '
+                  f'scale={scaler.get_scale():g}; mode={"AMP" if model._amp_enabled else "FP32"}',flush=True)
         v = predict(model,data,val_idx,cfg,device)
         score = ap(target[:,0],v[:,0])
         if not np.isfinite(score):
@@ -377,10 +438,14 @@ def fit_seed(name,seed,data,cfg,out,deadline,device):
         else:
             bad += 1
         history.append(dict(epoch=epoch+1,loss=total/seen,val_ap=score,
-                            val_onset_ap=ap(target[:,3],v[:,3]),lr=lr,seconds=time.monotonic()-tic))
+                            val_onset_ap=ap(target[:,3],v[:,3]),lr=lr,seconds=time.monotonic()-tic,
+                            overflow_retries=overflows,amp_enabled=model._amp_enabled,
+                            fp32_fallback=amp_at_start and not model._amp_enabled,
+                            loss_scale=scaler.get_scale()))
         complete = bad>=cfg.patience or epoch+1==cfg.epochs
         torch_save(checkpoint,dict(state=model.state_dict(),best_state=best_state,optimizer=opt.state_dict(),
-                                  scaler=scaler.state_dict(),epoch=epoch+1,best=best,bad=bad,history=history,
+                                  scaler=scaler.state_dict(),amp_enabled=model._amp_enabled,
+                                  epoch=epoch+1,best=best,bad=bad,history=history,
                                   complete=complete,rng=torch.get_rng_state(),numpy_rng=np.random.get_state(),
                                   python_rng=random.getstate(),cuda_rng=torch.cuda.get_rng_state_all() if device.type=='cuda' else []))
         print(f'{name} seed={seed} epoch={epoch+1:02d} loss={total/seen:.5f} val_AP={score:.4f} best={best:.4f} ({time.monotonic()-tic:.0f}s)',flush=True)
@@ -582,6 +647,46 @@ def evaluate_all(predictions,data,cfg,out,seed_metrics):
     return report
 
 
+# Exact workflow.py from the user's failing commit 34d5b3d. This is a narrow
+# recovery migration, not a general bypass of source/config/data fingerprints.
+PRE_AMP_FIX_SHA256 = 'f558a1b53ac59ede0b6dc2f8609abc71cba2d7050ea9fab3d4b565ce2d8a0cbe'
+
+
+def verify_resume_manifest(out, identity, signature):
+    manifest = out/'manifest.json'
+    if not manifest.exists():
+        return []
+    previous = json.loads(manifest.read_text())
+    migrations = previous.get('resume_migrations', [])
+    if previous['signature'] == signature:
+        return migrations
+    old_sources = previous.get('source_sha256', {})
+    current_sources = dict(identity['source_sha256'])
+    current_sources['model4/workflow.py'] = PRE_AMP_FIX_SHA256
+    fields = ['config', 'data_sha256', 'nodes_sha256']
+    # JSON canonicalisation makes tuples and their persisted list equivalents equal.
+    same_inputs = all(json.dumps(previous.get(k),sort_keys=True) ==
+                      json.dumps(identity[k],sort_keys=True) for k in fields)
+    no_predictions = not list(out.glob('*predictions.npz')) and not (out/'baselines.npz').exists()
+    status_path = out/'status.json'
+    incomplete = not status_path.exists() or not json.loads(status_path.read_text()).get('complete',False)
+    if not (old_sources == current_sources and same_inputs and no_predictions and incomplete):
+        raise ValueError('Output contains a different dataset/code/config run. Use a fresh output directory.')
+    backup = out/'manifest_before_amp_fix.json'
+    if not backup.exists():
+        json_save(backup,previous)
+    old_code = out/'source'
+    backup_code = out/'source_before_amp_fix'
+    if old_code.exists() and not backup_code.exists():
+        shutil.copytree(old_code,backup_code)
+    migrations = migrations + [dict(from_signature=previous['signature'],to_signature=signature,
+                                   fix='AMP overflow recovery; resume existing optimizer/RNG checkpoint',
+                                   original_workflow_sha256=PRE_AMP_FIX_SHA256)]
+    print('[resume] Applying compatible AMP recovery fix to unfinished 34d5b3d run; '
+          'saved epochs and optimizer/RNG state retained.',flush=True)
+    return migrations
+
+
 def run(root,out,cfg):
     out=Path(out); out.mkdir(parents=True,exist_ok=True)
     root=Path(root)
@@ -598,10 +703,10 @@ def run(root,out,cfg):
                   source_sha256={name:file_hash(modules_root/name) for name in sources})
     signature=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
     manifest=out/'manifest.json'
-    if manifest.exists() and json.loads(manifest.read_text())['signature']!=signature:
-        raise ValueError('Output contains a different dataset/code/config run. Use a fresh output directory.')
+    migrations = verify_resume_manifest(out,identity,signature)
     json_save(manifest,dict(signature=signature,**identity,device=str(device),torch=torch.__version__,
                            numpy=np.__version__,python=platform.python_version(),
+                           resume_migrations=migrations,
                            gpu=torch.cuda.get_device_name(0) if device.type=='cuda' else None))
     data=prepare(pd.read_parquet(root/'flood_dataset.parquet'),pd.read_csv(root/'nodes.csv'),cfg)
     json_save(out/'data_audit.json',data['audit']); np.savez_compressed(out/'preprocessing.npz',**data['norm'])
@@ -660,6 +765,7 @@ def run(root,out,cfg):
     evaluate_all(preds,data,cfg,out,seed_metrics)
     json_save(out/'status.json',dict(complete=True,pending=[],
               note='Observed test AP is an experiment result, not a guarantee of superiority or operational readiness.'))
+    (out/'failure.txt').unlink(missing_ok=True)
 
 
 if __name__=='__main__':

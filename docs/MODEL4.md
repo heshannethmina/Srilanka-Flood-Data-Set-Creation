@@ -105,6 +105,22 @@ also saves prediction arrays. Training can resume from attached extracted
 `runs/model4` output; the previous `model4_runs` layout is accepted too.
 Attach only your own checkpoint artifacts.
 
+Mixed-precision gradient overflow is handled before clipping: the loss scaler
+skips the invalid update, reduces its scale, and retries the same batch. Three
+unsuccessful attempts switch that seed to full precision. Non-finite full-precision
+gradients still fail explicitly. Retries, loss scale and precision mode are saved
+in epoch histories; the mode is restored with checkpoints. The Model 2 control
+computes its sigmoid in float32 before probability-space BCE.
+
+The interrupted pre-fix run from commit `34d5b3d` can resume automatically from
+its last saved epoch. This exception accepts only its exact old workflow hash,
+unchanged dataset/configuration/other model sources, and unfinished outputs
+without completed prediction caches. The previous manifest and available source
+snapshot are preserved, and the migration is recorded in the new manifest.
+Other incompatible runs still fail the fingerprint check. Keep the existing
+`runs/model4` directory in the same Kaggle session, or attach the extracted
+previous output in a new session, then rerun the usual notebook.
+
 The 7.5-hour cooperative training budget reserves approximately 30 minutes
 before an eight-hour total for baseline fitting, evaluation and packaging; it
 cannot guarantee a finish on every GPU/session. Partial work is explicitly
