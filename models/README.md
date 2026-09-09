@@ -70,13 +70,14 @@ fixed. That interval is the RQ1 answer; nothing already run is.
 
 [The Kaggle notebook](../notebooks/tfstgnn_kaggle.ipynb) now runs **Hydro-TEM**,
 a graph-free temporal neural ensemble, alongside a freshly trained Model 2
-architecture control and matched baselines. It embeds all required code and
-automatically finds or downloads the public tabular dataset. Import it, enable
-a GPU (and Internet if downloading), and Run All without editing code.
+architecture control and matched baselines through `kaggle_run.py --stage model4`.
+It follows the existing clone-and-run procedure: push the repository, attach
+the tabular dataset, enable GPU and Internet, and Run All without editing code.
+Outputs go to `/kaggle/working/runs/model4` and are packaged in `runs.zip`.
 See [Model 4's design and evaluation contract](../docs/MODEL4.md).
 Model 4 has no measured result yet. The older CLI stages below remain available.
 
-## Running Models 1–3 — Kaggle
+## Running Models 1–4 — Kaggle
 
 [`kaggle_run.py`](kaggle_run.py) is the only entry point and it **only runs on
 Kaggle**. It exits immediately anywhere else.
@@ -102,10 +103,10 @@ Kaggle**. It exits immediately anywhere else.
 
 ## Earlier CLI batch workflow (Models 1–3)
 
-The shared CLI supports batch execution with `--stage all`. The current
-[`notebook`](../notebooks/tfstgnn_kaggle.ipynb) instead packages Model 4's dedicated
-experiment; the following fault isolation and stage descriptions apply to the
-older CLI runner.
+The shared CLI supports the Models 1–3 batch with `--stage all`. The current
+[`notebook`](../notebooks/tfstgnn_kaggle.ipynb) uses the same CLI with
+`--stage model4` for its dedicated experiment. The following stage descriptions
+apply to the older batch schedule.
 
 Two properties make that safe to leave unattended:
 

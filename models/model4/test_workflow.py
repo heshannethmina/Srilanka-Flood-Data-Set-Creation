@@ -160,16 +160,66 @@ def test_end_to_end_artifacts(source,cfg,tmp_path):
     assert checkpoint.stat().st_mtime_ns==before
 
 
-def test_notebook_bundle_exact_and_compiles():
+def test_notebook_uses_existing_runner_and_compiles():
     root=Path(__file__).resolve().parents[2]
     nb=json.loads((root/'notebooks/tfstgnn_kaggle.ipynb').read_text(encoding='utf-8'))
-    for cell in nb['cells']:
-        if cell['cell_type']=='code':
-            src=''.join(cell['source']); tree=ast.parse(src)
-            for stmt in tree.body:
-                if isinstance(stmt,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='SOURCES' for t in stmt.targets):
-                    for name,code in ast.literal_eval(stmt.value).items():
-                        assert code==(root/name).read_text(encoding='utf-8')
-                        compile(code,name,'exec')
+    code=[''.join(c['source']) for c in nb['cells'] if c['cell_type']=='code']
+    tree=ast.parse('\n\n'.join(code))
+    assert not any(isinstance(n,ast.Name) and n.id=='__file__' for n in ast.walk(tree))
+    assert "'git', 'clone'" in code[0]
+    assert "'--stage', 'model4'" in code[2]
+    standalone=(root/'notebooks/model4_kaggle.py').read_text(encoding='utf-8')
+    assert ast.dump(ast.parse(standalone))==ast.dump(tree)
     import nbformat
     nbformat.validate(nb)
+
+
+@pytest.mark.parametrize('stage,expected',[
+    ('model4',(80,3,8.,1024)),
+    ('sar',(60,5,256,8)),
+])
+def test_kaggle_cli_dispatch_preserves_stage_defaults(stage,expected,tmp_path,monkeypatch):
+    import kaggle_run as runner
+    (tmp_path/'nodes.csv').write_text('node_id\nA\n')
+    monkeypatch.setattr(sys,'argv',['kaggle_run.py','--stage',stage])
+    monkeypatch.setattr(runner,'require_kaggle',lambda:None)
+    monkeypatch.setattr(runner,'report_env',lambda:None)
+    monkeypatch.setattr(runner,'find_input',lambda *args:str(tmp_path))
+    monkeypatch.setattr(runner,'summarise',lambda:None)
+    monkeypatch.setattr(runner,'RUNS',str(tmp_path/'runs'))
+    monkeypatch.setattr(torch.cuda,'is_available',lambda:True)
+    calls=[]
+    monkeypatch.setattr(runner,'stage_model4',lambda root,epochs,seeds,budget,batch,overrides:calls.append((epochs,seeds,budget,batch)))
+    monkeypatch.setattr(runner,'stage_sar',lambda root,sar,epochs,seeds,px,batch:calls.append((epochs,seeds,px,batch)))
+    runner.main()
+    assert calls==[expected]
+
+
+@pytest.mark.parametrize('fail',[False,True])
+def test_model4_runner_packages_outputs_even_on_failure(tmp_path,monkeypatch,fail):
+    import kaggle_run as runner
+    from types import SimpleNamespace
+    import zipfile
+    monkeypatch.setattr(runner,'RUNS',str(tmp_path/'runs'))
+    source=tmp_path/'models'; source.mkdir()
+    (source/'example.py').write_text('pass\n')
+    monkeypatch.setattr(runner,'HERE',str(source))
+    monkeypatch.setattr(runner.glob,'glob',lambda *args,**kwargs:[])
+    monkeypatch.setattr(runner.subprocess,'run',lambda *args,**kwargs:SimpleNamespace(stdout='test-commit\n'))
+    def fake_run(root,out,cfg):
+        assert cfg.epochs==80 and cfg.seeds==(0,1,2) and cfg.budget_hours==7.5
+        (out/'checkpoint-marker.txt').write_text('saved')
+        if fail:
+            raise RuntimeError('simulated training failure')
+        (out/'status.json').write_text(json.dumps({'complete':False,'pending':['seed 1']}))
+    monkeypatch.setattr(workflow,'run',fake_run)
+    if fail:
+        with pytest.raises(RuntimeError,match='simulated training failure'):
+            runner.stage_model4(str(tmp_path),80,3,8.,1024)
+    else:
+        assert not runner.stage_model4(str(tmp_path),80,3,8.,1024)['complete']
+    with zipfile.ZipFile(tmp_path/'runs.zip') as archive:
+        assert 'runs/model4/checkpoint-marker.txt' in archive.namelist()
+        assert 'runs/model4/source/models/example.py' in archive.namelist()
+        if fail:
+            assert 'simulated training failure' in archive.read('runs/model4/failure.txt').decode()

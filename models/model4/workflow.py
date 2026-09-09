@@ -1,4 +1,4 @@
-"""Self-contained Model 4 experiment, embedded in the Kaggle notebook.
+"""Model 4 experiment, launched by kaggle_run.py --stage model4.
 
 Research candidate, not a claim of improvement. See docs/MODEL4.md.
 """

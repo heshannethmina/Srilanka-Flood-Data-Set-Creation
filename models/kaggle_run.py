@@ -1,4 +1,4 @@
-"""Kaggle runner for both model families — **this file only runs on Kaggle**.
+"""Kaggle runner for all four model families — **this file only runs on Kaggle**.
 
 Dataset creation lives in `scripts/`. This directory is model creation only; the
 two never share an entry point, so a rebuild of the data and a rebuild of the
@@ -11,6 +11,7 @@ Attach both datasets to the notebook, turn the GPU on, then:
 
 Stages (run them separately if you are near a session limit):
 
+    model4        Hydro-TEM + paired control + matched baselines    own session
     baselines     the four reference models of §7.8                  ~10 min
     ladder3       P0 -> P3, model 3 — the RQ1 answer                 ~4 h
     onset         P4_onset + its paired control — early warning      ~3 h
@@ -47,6 +48,9 @@ import argparse
 import glob
 import json
 import os
+from pathlib import Path
+import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -150,6 +154,59 @@ def report_env() -> None:
 def stage_baselines(root: str) -> Dict:
     from floodlib.baselines import run_baselines
     return {"baselines_temporal": run_baselines("temporal", root, out_dir=RUNS)}
+
+
+def stage_model4(root: str, epochs: int, seeds: int, budget: float,
+                 batch_size: int, overrides=None) -> Dict:
+    """Model 4 uses the existing Kaggle entry point and output directory.
+
+    Its stricter evaluation protocol remains separate from the legacy report
+    schema. Reserve half an hour of the session budget for final reporting.
+    """
+    from dataclasses import replace
+    from model4.workflow import Config, run
+    train, model = overrides or ({}, {})
+    supported = {'lr', 'weight_decay', 'grad_clip', 'patience', 'dropout', 'lookback'}
+    requested = {**train, **model}
+    unknown = set(requested) - supported
+    if unknown:
+        raise ValueError(f'Model 4 does not support these overrides: {sorted(unknown)}')
+    if epochs < 1 or seeds < 1 or batch_size < 1 or budget <= 0.5:
+        raise ValueError('Use positive epochs/seeds/batch-size and a time budget greater than 0.5 hours.')
+    cfg = replace(Config(), epochs=epochs, seeds=tuple(range(seeds)),
+                  batch_size=batch_size, budget_hours=budget-0.5, **requested)
+    if cfg.lookback < 4:
+        raise ValueError('Model 4 needs a lookback of at least four days.')
+    out = Path(RUNS)/'model4'
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        if not (out/'manifest.json').exists():
+            previous = sorted(set(glob.glob('/kaggle/input/**/model4/manifest.json', recursive=True)
+                                  + glob.glob('/kaggle/input/**/model4_runs/manifest.json', recursive=True)))
+            if len(previous) > 1:
+                raise ValueError('Attach only one previous Model 4 output to resume.')
+            if previous:
+                shutil.copytree(Path(previous[0]).parent, out, dirs_exist_ok=True)
+                print(f'[model4] restored {Path(previous[0]).parent}')
+        run(root, out, cfg)
+        status = json.loads((out/'status.json').read_text())
+        print(f"[model4] {'COMPLETE' if status['complete'] else 'PARTIAL: checkpointed for resume'}")
+        return status
+    except Exception:
+        (out/'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')
+        raise
+    finally:
+        # Preserve available checkpoints and their exact source even on failure.
+        shutil.copytree(HERE, out/'source'/'models', dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        with (out/'environment.txt').open('w', encoding='utf-8') as handle:
+            subprocess.run([sys.executable, '-m', 'pip', 'freeze'], stdout=handle, check=False)
+        commit = subprocess.run(['git', '-C', HERE, 'rev-parse', 'HEAD'],
+                                capture_output=True, text=True, check=False)
+        (out/'git_commit.txt').write_text(commit.stdout.strip(), encoding='utf-8')
+        archive = shutil.make_archive(str(Path(RUNS).parent/'runs'), 'zip',
+                                      Path(RUNS).parent, Path(RUNS).name)
+        print(f'[output] {archive}', flush=True)
 
 
 def _ladder(run_fn, root: str, epochs: int, presets: List[str],
@@ -304,13 +361,15 @@ def summarise() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Run the flood early-warning models on Kaggle.")
-    ap.add_argument("--stage", default="all", choices=["all"] + ORDER)
+    # Model 4 is an explicit session, not appended to the already long legacy all.
+    ap.add_argument("--stage", default="all", choices=["all", "model4"] + ORDER)
     ap.add_argument("--time-budget-hours", type=float, default=8.0,
                     help="stop starting new stages past this; Kaggle kills a GPU "
                          "session at ~9 h, and a killed session saves nothing")
-    ap.add_argument("--epochs", type=int, default=60)
-    ap.add_argument("--seeds", type=int, default=5,
-                    help="ensemble size for the M6/N6 SAR presets (§7.7 uses 5)")
+    ap.add_argument("--epochs", type=int, default=None,
+                    help="default 80 for Model 4, 60 for legacy stages")
+    ap.add_argument("--seeds", type=int, default=None,
+                    help="default 3 for Model 4, 5 for M6/N6 SAR presets")
     ap.add_argument("--presets", default="M0,M1,M2,M3,M4,M5",
                     help="model 1 ladder steps, comma-separated; narrow it to "
                          "revisit one step without re-running the whole ladder")
@@ -330,14 +389,36 @@ def main() -> None:
                          "activation memory versus 512 and still resolves the channel")
     ap.add_argument("--pretrain-epochs", type=int, default=25,
                     help="epochs for the sar_pretrain stage")
-    ap.add_argument("--batch-size", type=int, default=8,
-                    help="M6_cnn / N6_gated only")
+    ap.add_argument("--batch-size", type=int, default=None,
+                    help="default 1024 node windows for Model 4; 8 snapshots for SAR")
     # The same hyperparameter override flags every train.py accepts, so a sweep
     # is a sequence of command lines rather than a sequence of config edits.
     from floodlib import engine
     engine.add_override_args(ap)
     a = ap.parse_args()
+    if a.epochs is None:
+        a.epochs = 80 if a.stage == 'model4' else 60
+    if a.seeds is None:
+        a.seeds = 3 if a.stage == 'model4' else 5
+    if a.batch_size is None:
+        a.batch_size = 1024 if a.stage == 'model4' else 8
     overrides = engine.overrides_from_args(a)
+
+    if a.stage == 'model4':
+        require_kaggle()
+        report_env()
+        import torch
+        if not torch.cuda.is_available():
+            sys.exit('[fatal] Model 4 requires a GPU; enable GPU T4 x2 in Kaggle settings.')
+        root = find_input('flood_dataset.parquet',
+                          'attach uom230429e/sri-lanka-flood-tabular-graph-2003-2025')
+        if root is None:
+            show_inputs()
+            sys.exit('[fatal] attach the tabular dataset via Add Input')
+        if not os.path.isfile(os.path.join(root, 'nodes.csv')):
+            sys.exit('[fatal] the tabular dataset must also contain nodes.csv')
+        stage_model4(root, a.epochs, a.seeds, a.time_budget_hours, a.batch_size, overrides)
+        return
 
     from model1.config import PRESETS as P1
     from model2.config import PRESETS as P2

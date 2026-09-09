@@ -1,16 +1,30 @@
 # Model 4: Hydro-TEM
 
-Use [the Kaggle notebook](../notebooks/tfstgnn_kaggle.ipynb): import it, enable
-a GPU, and Run All. Enable Internet when the public tabular dataset is not
-attached or a required package is absent. No notebook code edits, GitHub push,
-repository clone, private credentials, or SAR dataset are needed.
+Use [the Kaggle notebook](../notebooks/tfstgnn_kaggle.ipynb), following the same
+procedure as Models 1–3. Push the updated repository, attach
+`uom230429e/sri-lanka-flood-tabular-graph-2003-2025`, enable GPU T4 x2 and Internet,
+then Save & Run All. The notebook clones the repository, validates the input,
+and calls the existing runner with `--stage model4`. No imagery dataset or
+notebook code edits are needed.
 
-If you prefer pasting code, copy the **entire**
-[`notebooks/model4_kaggle.py`](../notebooks/model4_kaggle.py) file into one empty
-Kaggle code cell and run it. It contains the same executable code as the notebook.
-Replace the old generator cell; pushing GitHub changes does not update a cell
-you already pasted into Kaggle. `scripts/build_model4_notebook.py` is only the
-local packaging tool and must not be pasted into Kaggle.
+The equivalent two commands in a fresh Kaggle session are:
+
+```python
+!git clone -q https://github.com/heshannethmina/Srilanka-Flood-Data-Set-Creation /kaggle/working/repo
+!python -u /kaggle/working/repo/models/kaggle_run.py --stage model4
+```
+
+The notebook refreshes its disposable clone when rerun, leaving saved outputs
+in `/kaggle/working/runs/model4`. Download `runs.zip`, as in earlier experiments.
+The stage includes its own matched baselines and is run separately from the
+older `--stage all` schedule. Defaults are 80 epochs, three seeds and a batch
+of 1024 node windows; legacy stage defaults remain unchanged. `--epochs`,
+`--seeds`, `--batch-size` and `--time-budget-hours` are supported.
+
+[`notebooks/model4_kaggle.py`](../notebooks/model4_kaggle.py) contains the same
+short launcher if a single code cell is preferred. The local packaging helper
+also follows this procedure when pasted into Kaggle; it no longer raises the
+`__file__` guard or downloads and executes a notebook as JSON.
 
 ## Why this candidate
 
@@ -81,19 +95,22 @@ models; a single block length and three seeds do not exhaust uncertainty.
 
 ## Reproducibility and limits
 
-The notebook embeds the exact Model 4 source and required Model 2 modules.
-Regenerate it after edits with `python scripts/build_model4_notebook.py`.
+The notebook executes Model 4 from the cloned repository through the shared
+runner. The commit, exact model sources and environment are saved alongside
+the outputs. Regenerate launcher cells after edits with
+`python scripts/build_model4_notebook.py`.
 Source/config/data fingerprints reject incompatible resumed runs. Epoch
 checkpoints retain model, optimiser, scaler and RNG state; each completed seed
 also saves prediction arrays. Training can resume from attached extracted
-`model4_runs` output. Attach only your own checkpoint artifacts.
+`runs/model4` output; the previous `model4_runs` layout is accepted too.
+Attach only your own checkpoint artifacts.
 
 The 7.5-hour cooperative training budget reserves approximately 30 minutes
 before an eight-hour total for baseline fitting, evaluation and packaging; it
 cannot guarantee a finish on every GPU/session. Partial work is explicitly
 labelled and no final comparison is emitted until the neural schedule completes.
 Failures raise normally, with `failure.txt` and the available output ZIP saved
-by the notebook's `finally` block.
+by the runner's `finally` block.
 
 The inherited processed dataset uses interpolation/backfill in weather/soil
 features. Those values cannot be restored to their original missingness from
