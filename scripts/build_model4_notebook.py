@@ -7,6 +7,13 @@ import hashlib
 import json
 from pathlib import Path
 
+if '__file__' not in globals():
+    raise RuntimeError(
+        'This is the repository notebook builder, not the Kaggle training notebook. '
+        'Import notebooks/tfstgnn_kaggle.ipynb into Kaggle and Run All. '
+        'Do not paste scripts/build_model4_notebook.py into a notebook cell.'
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ['models/model4/__init__.py', 'models/model4/workflow.py',
          'models/model2/__init__.py', 'models/model2/config.py',
