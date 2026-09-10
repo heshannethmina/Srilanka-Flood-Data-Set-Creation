@@ -1,5 +1,9 @@
 # Model 4: Hydro-TEM
 
+The first completed run is analysed in [MODEL4_RESULTS.md](MODEL4_RESULTS.md):
+Model 4 24h AP **0.8428**, matched Model 2 control **0.8554**, LightGBM **0.8606**.
+Model 4 is smaller but does not deliver the intended accuracy improvement.
+
 Use [the Kaggle notebook](../notebooks/tfstgnn_kaggle.ipynb), following the same
 procedure as Models 1–3. Push the updated repository, attach
 `uom230429e/sri-lanka-flood-tabular-graph-2003-2025`, enable GPU T4 x2 and Internet,

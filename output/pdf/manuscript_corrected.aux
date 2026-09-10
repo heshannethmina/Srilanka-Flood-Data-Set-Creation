@@ -1,0 +1,77 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{kratzert2018,nearing2024}
+\citation{kratzert2018}
+\citation{nearing2024}
+\citation{saubhagya2025}
+\citation{vaswani2017}
+\citation{gorishniy2022}
+\citation{perez2018}
+\citation{kirschstein2024}
+\citation{lin2017}
+\citation{lakshminarayanan2017,guo2017}
+\citation{saito2015}
+\citation{roberts2017}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{1}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-A}}Neural hydrological forecasting}{1}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-B}}Representation and conditioning}{1}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-C}}Evaluation and probability quality}{1}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Study Data and Prediction Task}{1}{section.3}\protected@file@percent }
+\newlabel{sec:data}{{III}{1}{Study Data and Prediction Task}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Spatial Coverage and Data Provenance}{1}{subsection.3.1}\protected@file@percent }
+\citation{power}
+\citation{harrigan2020,openmeteo}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Study locations and curated links, coloured by climatic zone. Country outline: Natural Earth.}}{2}{figure.1}\protected@file@percent }
+\newlabel{fig:map}{{1}{2}{Study locations and curated links, coloured by climatic zone. Country outline: Natural Earth}{figure.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}Targets and Episode Definition}{2}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Dataset Scope}{2}{subsection.3.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Annual distribution of node-level proxy episode onsets (2003--2024) across experimental temporal splits.}}{2}{figure.2}\protected@file@percent }
+\newlabel{fig:episodes}{{2}{2}{Annual distribution of node-level proxy episode onsets (2003--2024) across experimental temporal splits}{figure.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Deep Neural Network Method}{2}{section.4}\protected@file@percent }
+\newlabel{sec:method}{{IV}{2}{Deep Neural Network Method}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Numerical and temporal representation}{2}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Cross-feature attention and static conditioning}{2}{subsection.4.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Model data flow: parallel temporal/feature branches merge and are conditioned on static attributes; optional radar fusion (dashed) feeds the shared head. No graph message passing is used.}}{3}{figure.3}\protected@file@percent }
+\newlabel{fig:architecture}{{3}{3}{Model data flow: parallel temporal/feature branches merge and are conditioned on static attributes; optional radar fusion (dashed) feeds the shared head. No graph message passing is used}{figure.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Optional radar branch}{3}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Multi-task optimisation and calibrated inference}{3}{subsection.4.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {V}Experimental Design}{3}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Configuration and Ablations}{3}{subsection.5.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Experimental configuration.}}{3}{table.1}\protected@file@percent }
+\newlabel{tab:settings}{{I}{3}{Experimental configuration}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Evaluation}{3}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Results}{3}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Neural representation and static conditioning}{3}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Objective, ensemble and calibration}{3}{subsection.6.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Main DNN results on the temporal test split.}}{4}{table.2}\protected@file@percent }
+\newlabel{tab:ablation}{{II}{4}{Main DNN results on the temporal test split}{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Radar fusion and model size}{4}{subsection.6.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-D}}Detection at recorded operating points}{4}{subsection.6.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-E}}Historical references and split diagnostics}{4}{subsection.6.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Historical references (2 Aug 2026); panel extent differs from Table~\ref {tab:ablation}. Dashes: unavailable.}}{4}{table.3}\protected@file@percent }
+\newlabel{tab:legacy}{{III}{4}{Historical references (2 Aug 2026); panel extent differs from Table~\ref {tab:ablation}. Dashes: unavailable}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Practical Interpretation and Limitations}{4}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-A}}Operational Relevance}{4}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-B}}Validation and Reproducibility}{4}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-C}}Further Evaluation}{4}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{4}{section.8}\protected@file@percent }
+\bibcite{kratzert2018}{1}
+\bibcite{nearing2024}{2}
+\bibcite{saubhagya2025}{3}
+\bibcite{vaswani2017}{4}
+\bibcite{gorishniy2022}{5}
+\bibcite{perez2018}{6}
+\bibcite{kirschstein2024}{7}
+\bibcite{lin2017}{8}
+\bibcite{lakshminarayanan2017}{9}
+\bibcite{guo2017}{10}
+\bibcite{saito2015}{11}
+\bibcite{roberts2017}{12}
+\bibcite{power}{13}
+\bibcite{harrigan2020}{14}
+\bibcite{openmeteo}{15}
+\@writefile{toc}{\contentsline {section}{References}{5}{section*.1}\protected@file@percent }
+\gdef \@abspage@last{5}

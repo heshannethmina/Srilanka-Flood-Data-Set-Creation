@@ -75,7 +75,11 @@ It follows the existing clone-and-run procedure: push the repository, attach
 the tabular dataset, enable GPU and Internet, and Run All without editing code.
 Outputs go to `/kaggle/working/runs/model4` and are packaged in `runs.zip`.
 See [Model 4's design and evaluation contract](../docs/MODEL4.md).
-Model 4 has no measured result yet. The older CLI stages below remain available.
+The first completed run reaches 24h AP **0.8428**, versus **0.8554** for the
+matched Model 2 control and **0.8606** for LightGBM. The primary paired intervals
+favour both comparators; Model 4 is an efficiency tradeoff rather than an accuracy
+upgrade. See the [verified results](../docs/MODEL4_RESULTS.md). The older CLI
+stages below remain available.
 
 ## Running Models 1–4 — Kaggle
 

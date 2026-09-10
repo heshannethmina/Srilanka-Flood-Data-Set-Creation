@@ -114,7 +114,9 @@ baselines through `models/kaggle_run.py --stage model4`. As with Models 1–3,
 push the repository, attach the tabular dataset, enable GPU and Internet, and
 Run All. The notebook clones the repository automatically. See
 [the design and evaluation protocol](docs/MODEL4.md).
-Model 4's predictive performance is pending the Kaggle run.
+The first completed run reaches 24h AP **0.8428**, below the matched Model 2
+control (**0.8554**) and LightGBM (**0.8606**), with 78.8% fewer parameters than
+the neural control. See the [verified comparison](docs/MODEL4_RESULTS.md).
 
 Dataset creation ([`scripts/`](scripts/)) and model creation
 ([`models/`](models/)) are kept in separate directories with no shared entry
