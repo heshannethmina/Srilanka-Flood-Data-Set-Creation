@@ -1,4 +1,4 @@
-# Model 4: paste this whole file into one Kaggle cell.
+# Model 4 v2: paste this whole file into one Kaggle cell.
 # Same clone + kaggle_run.py procedure as Models 1–3.
 
 # 1. Get the code, following the existing Kaggle notebook procedure.
@@ -33,22 +33,26 @@ print('GPU:', torch.cuda.get_device_name(0), '| PyTorch:', torch.__version__)
 hits = [p for p in Path('/kaggle/input').rglob('flood_dataset.parquet')
         if (p.parent/'nodes.csv').exists()]
 assert hits, 'Add Input: uom230429e/sri-lanka-flood-tabular-graph-2003-2025'
-print('Tabular dataset:', min(hits, key=lambda p: len(str(p))).parent)
+assert len(hits) == 1, 'Attach exactly one tabular dataset version to avoid ambiguous input.'
+print('Tabular dataset:', hits[0].parent)
+indices = list(Path('/kaggle/input').rglob('image_dataset.csv'))
+print('Image indices for metadata audit:', [str(p) for p in indices] or 'not attached (optional)')
 
 
 # 3. Run Model 4 through the established model runner.
 # The stage includes its own matched baselines; no separate baselines stage.
 subprocess.run([sys.executable, '-u', str(DEST/'models/kaggle_run.py'),
-                '--stage', 'model4', '--time-budget-hours', '8'], check=True)
+                '--stage', 'model4_v2', '--time-budget-hours', '8'], check=True)
 
 
 # 4. Inspect completion and download results, as in earlier notebooks.
 import pandas as pd
 from IPython.display import display, Image, FileLink
 
-OUT = Path('/kaggle/working/runs/model4')
+OUT = Path('/kaggle/working/runs/model4_v2')
 status = json.loads((OUT/'status.json').read_text())
 display(status)
+display(json.loads((OUT/'image_audit.json').read_text()))
 if status['complete']:
     display(pd.read_csv(OUT/'summary.csv'))
     display(Image(filename=str(OUT/'evaluation.png')))

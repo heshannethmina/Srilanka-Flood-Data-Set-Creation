@@ -167,7 +167,7 @@ def test_notebook_uses_existing_runner_and_compiles():
     tree=ast.parse('\n\n'.join(code))
     assert not any(isinstance(n,ast.Name) and n.id=='__file__' for n in ast.walk(tree))
     assert "'git', 'clone'" in code[0]
-    assert "'--stage', 'model4'" in code[2]
+    assert "'--stage', 'model4_v2'" in code[2]
     standalone=(root/'notebooks/model4_kaggle.py').read_text(encoding='utf-8')
     assert ast.dump(ast.parse(standalone))==ast.dump(tree)
     import nbformat

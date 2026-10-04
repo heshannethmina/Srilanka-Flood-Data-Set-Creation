@@ -7,24 +7,27 @@ import hashlib
 import json
 from pathlib import Path
 
-INTRO = '''# Model 4 — Hydro-TEM: Kaggle session
+INTRO = '''# Model 4 v2 — full temporal attention: Kaggle session
 
 This follows the same procedure as Models 1–3: clone the repository, check the
-attached dataset and GPU, then run `models/kaggle_run.py --stage model4`.
+attached dataset and GPU, then run `models/kaggle_run.py --stage model4_v2`.
 Push the updated repository before running so the clone includes the new stage.
 
 **Kaggle settings**
 
 1. Add Input: `uom230429e/sri-lanka-flood-tabular-graph-2003-2025`.
+   Optionally attach `uom230429e/flood-data-set` for an image cadence/label audit.
 2. Accelerator: GPU T4 x2. The experiment uses one GPU.
 3. Internet: On, for the repository clone.
 
 Then **Save Version → Save & Run All**. No code edits or imagery dataset needed.
 
-The stage trains Model 4, a matched three-seed Model 2 control, a one-seed
-current-day ablation, LightGBM and simple baselines. Outputs and resumable
-checkpoints go to `/kaggle/working/runs/model4`; download `runs.zip` afterward.
-Model 4's performance is unmeasured until you complete this experiment.
+The stage trains the v2 candidate, the original summary-based Model 4 and
+Model 2 with three seeds EACH, plus LightGBM and simple baselines. Outputs
+go to `/kaggle/working/runs/model4_v2`; download `runs.zip` afterward.
+The previous run scored AP 0.8428 (Model 4), 0.8554 (Model 2 control), and
+0.8606 (LightGBM). The v2 candidate has not been evaluated on the real data.
+It trains on daily tabular sequences; image pixels are not used in this run.
 '''
 
 CLONE = '''# 1. Get the code, following the existing Kaggle notebook procedure.
@@ -59,22 +62,26 @@ print('GPU:', torch.cuda.get_device_name(0), '| PyTorch:', torch.__version__)
 hits = [p for p in Path('/kaggle/input').rglob('flood_dataset.parquet')
         if (p.parent/'nodes.csv').exists()]
 assert hits, 'Add Input: uom230429e/sri-lanka-flood-tabular-graph-2003-2025'
-print('Tabular dataset:', min(hits, key=lambda p: len(str(p))).parent)
+assert len(hits) == 1, 'Attach exactly one tabular dataset version to avoid ambiguous input.'
+print('Tabular dataset:', hits[0].parent)
+indices = list(Path('/kaggle/input').rglob('image_dataset.csv'))
+print('Image indices for metadata audit:', [str(p) for p in indices] or 'not attached (optional)')
 '''
 
 TRAIN = '''# 3. Run Model 4 through the established model runner.
 # The stage includes its own matched baselines; no separate baselines stage.
 subprocess.run([sys.executable, '-u', str(DEST/'models/kaggle_run.py'),
-                '--stage', 'model4', '--time-budget-hours', '8'], check=True)
+                '--stage', 'model4_v2', '--time-budget-hours', '8'], check=True)
 '''
 
 DISPLAY = '''# 4. Inspect completion and download results, as in earlier notebooks.
 import pandas as pd
 from IPython.display import display, Image, FileLink
 
-OUT = Path('/kaggle/working/runs/model4')
+OUT = Path('/kaggle/working/runs/model4_v2')
 status = json.loads((OUT/'status.json').read_text())
 display(status)
+display(json.loads((OUT/'image_audit.json').read_text()))
 if status['complete']:
     display(pd.read_csv(OUT/'summary.csv'))
     display(Image(filename=str(OUT/'evaluation.png')))
@@ -91,10 +98,11 @@ Train: 2003–2017. Checkpoint selection: 2018–2019. Calibration and threshold
 removed. The Model 2 control is retrained with the new protocol and inputs;
 historical Model 1–3 scores are context, not a matched comparison.
 
-Model 4 uses numerical embeddings, gated observed-history summaries, and neural
-ensembling with BCE. Its cumulative hazards enforce `p24 <= p48 <= p72`, and
+Model 4 v2 adds a full sequence transformer, feature attention and static FiLM
+to the original current-day/history-summary branch, with neural ensembling and
+BCE. Its cumulative hazards enforce `p24 <= p48 <= p72`, and
 onset is zero for nodes currently flooding. See `docs/MODEL4.md` in the repository
-for the architecture, sources and full evaluation contract.
+and `docs/MODEL4_V2.md` for the architecture and evaluation contract.
 
 The labels are reanalysis discharge-Q98 exceedances, not measured inundation.
 Processed weather/soil already contains interpolation/backfill that this model
@@ -104,7 +112,7 @@ still need a new locked holdout and an audit of operational data availability.
 The eight-hour budget assigns 7.5 hours to neural training and leaves time for
 baselines and packaging. Runtime depends on the GPU. Incomplete runs are labelled
 partial rather than reported as final comparisons. Attach the previous extracted
-`runs/model4` output to resume; the older `model4_runs` layout is also accepted.
+`runs/model4_v2` output to resume. Original v1 checkpoints are kept separate.
 Code, config and data hashes prevent mixing incompatible checkpoints.
 
 Download `runs.zip` from the notebook output. It includes weights, optimiser/RNG
@@ -136,7 +144,7 @@ def build(root):
     path.write_text(json.dumps(notebook, indent=1, ensure_ascii=False)+'\n', encoding='utf-8')
     print(path)
     script = root/'notebooks/model4_kaggle.py'
-    script.write_text('# Model 4: paste this whole file into one Kaggle cell.\n'
+    script.write_text('# Model 4 v2: paste this whole file into one Kaggle cell.\n'
                       '# Same clone + kaggle_run.py procedure as Models 1–3.\n\n'
                       + '\n\n'.join(CODE_CELLS), encoding='utf-8')
     print(script)

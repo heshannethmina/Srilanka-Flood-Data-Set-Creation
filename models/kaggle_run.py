@@ -157,7 +157,7 @@ def stage_baselines(root: str) -> Dict:
 
 
 def stage_model4(root: str, epochs: int, seeds: int, budget: float,
-                 batch_size: int, overrides=None) -> Dict:
+                 batch_size: int, overrides=None, revision='v1') -> Dict:
     """Model 4 uses the existing Kaggle entry point and output directory.
 
     Its stricter evaluation protocol remains separate from the legacy report
@@ -173,16 +173,18 @@ def stage_model4(root: str, epochs: int, seeds: int, budget: float,
         raise ValueError(f'Model 4 does not support these overrides: {sorted(unknown)}')
     if epochs < 1 or seeds < 1 or batch_size < 1 or budget <= 0.5:
         raise ValueError('Use positive epochs/seeds/batch-size and a time budget greater than 0.5 hours.')
-    cfg = replace(Config(), epochs=epochs, seeds=tuple(range(seeds)),
+    cfg = replace(Config(), revision=revision, epochs=epochs, seeds=tuple(range(seeds)),
                   batch_size=batch_size, budget_hours=budget-0.5, **requested)
     if cfg.lookback < 4:
         raise ValueError('Model 4 needs a lookback of at least four days.')
-    out = Path(RUNS)/'model4'
+    tag = 'model4_v2' if revision == 'v2' else 'model4'
+    out = Path(RUNS)/tag
     out.mkdir(parents=True, exist_ok=True)
     try:
         if not (out/'manifest.json').exists():
-            previous = sorted(set(glob.glob('/kaggle/input/**/model4/manifest.json', recursive=True)
-                                  + glob.glob('/kaggle/input/**/model4_runs/manifest.json', recursive=True)))
+            previous = sorted(set(glob.glob(f'/kaggle/input/**/{tag}/manifest.json', recursive=True)
+                                  + (glob.glob('/kaggle/input/**/model4_runs/manifest.json', recursive=True)
+                                     if revision == 'v1' else [])))
             if len(previous) > 1:
                 raise ValueError('Attach only one previous Model 4 output to resume.')
             if previous:
@@ -362,7 +364,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Run the flood early-warning models on Kaggle.")
     # Model 4 is an explicit session, not appended to the already long legacy all.
-    ap.add_argument("--stage", default="all", choices=["all", "model4"] + ORDER)
+    ap.add_argument("--stage", default="all", choices=["all", "model4", "model4_v2"] + ORDER)
     ap.add_argument("--time-budget-hours", type=float, default=8.0,
                     help="stop starting new stages past this; Kaggle kills a GPU "
                          "session at ~9 h, and a killed session saves nothing")
@@ -397,14 +399,14 @@ def main() -> None:
     engine.add_override_args(ap)
     a = ap.parse_args()
     if a.epochs is None:
-        a.epochs = 80 if a.stage == 'model4' else 60
+        a.epochs = 80 if a.stage in ['model4','model4_v2'] else 60
     if a.seeds is None:
-        a.seeds = 3 if a.stage == 'model4' else 5
+        a.seeds = 3 if a.stage in ['model4','model4_v2'] else 5
     if a.batch_size is None:
-        a.batch_size = 1024 if a.stage == 'model4' else 8
+        a.batch_size = 512 if a.stage == 'model4_v2' else (1024 if a.stage == 'model4' else 8)
     overrides = engine.overrides_from_args(a)
 
-    if a.stage == 'model4':
+    if a.stage in ['model4','model4_v2']:
         require_kaggle()
         report_env()
         import torch
@@ -417,7 +419,11 @@ def main() -> None:
             sys.exit('[fatal] attach the tabular dataset via Add Input')
         if not os.path.isfile(os.path.join(root, 'nodes.csv')):
             sys.exit('[fatal] the tabular dataset must also contain nodes.csv')
-        stage_model4(root, a.epochs, a.seeds, a.time_budget_hours, a.batch_size, overrides)
+        if a.stage == 'model4_v2':
+            stage_model4(root, a.epochs, a.seeds, a.time_budget_hours, a.batch_size,
+                         overrides, revision='v2')
+        else:
+            stage_model4(root, a.epochs, a.seeds, a.time_budget_hours, a.batch_size, overrides)
         return
 
     from model1.config import PRESETS as P1

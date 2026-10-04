@@ -32,6 +32,7 @@ from model2.model import MMFNet
 
 @dataclass
 class Config:
+    revision: str = 'v1'
     lookback: int = 14
     width: int = 128
     members: int = 4
@@ -241,13 +242,17 @@ class HydroTEM(nn.Module):
             # separate dry/wet first-day hazard, then conditional day-2/day-3 hazards
             self.head.bias[:] = torch.tensor([-4., 1., -4., -4.])
 
-    def forward(self, x, s, state):
+    def encode(self, x, s):
         cur = x[:,-1]
         h = self.current(torch.cat([self.embed(cur[:,:self.numeric_dim]),cur,s],-1))
         if self.temporal:
             # Observed lags and changes, no target-time weather/discharge.
             history = torch.cat([x[:,-2], x[:,-4:].mean(1), x.mean(1), cur-x[:,0]],-1)
             h = h + self.gate.sigmoid()*self.history(history)
+        return h
+
+    def forward(self, x, s, state):
+        h = self.encode(x,s)
         h = h[:,None].expand(-1,self.k,-1)
         for layer, norm in zip(self.layers,self.norms):
             h = norm(h+self.drop(F.gelu(layer(h))))
@@ -274,6 +279,9 @@ class Model2Control(nn.Module):
 
 
 def build_model(name, data, cfg):
+    if name == 'model4' and cfg.revision == 'v2':
+        from model4.upgrade import HydroTemporalV2
+        return HydroTemporalV2(data,cfg)
     return Model2Control(data,cfg) if name == 'model2_control' else HydroTEM(data,cfg, name != 'model4_current')
 
 
@@ -602,6 +610,7 @@ def evaluate_all(predictions,data,cfg,out,seed_metrics):
             result['heads'][head] = dict(at_calibration_f1=metrics(ty[:,h],tp[:,h],th),
                                         at_calibration_far=metrics(ty[:,h],tp[:,h],far_th),
                                         raw_ap=ap(ty[:,h],pp['test'][:,h]),
+                                        raw_brier=float(np.mean((pp['test'][:,h]-ty[:,h])**2)),
                                         calibration_far_feasible=far_th<=1)
             if h in [0,2,3]:
                 result['heads'][head]['events'] = event_report(data,ti,tp[:,h],far_th,3 if h==2 else 1)
@@ -615,7 +624,7 @@ def evaluate_all(predictions,data,cfg,out,seed_metrics):
                             day=ti[:,0],node=ti[:,1],date=data['dates'][ti[:,0]],node_id=np.array(data['ids'])[ti[:,1]])
     contrasts = {}
     if 'model4' in calibrated:
-        for other in ['model2_control','lightgbm','model4_current','discharge_pctl']:
+        for other in ['model2_control','lightgbm','model4_current','model4_summary','discharge_pctl']:
             if other in calibrated:
                 contrasts[other] = paired_bootstrap(ty[:,0],calibrated['model4'][:,0],calibrated[other][:,0],
                                                     data['dates'][ti[:,0]],cfg.bootstrap_draws)
@@ -698,6 +707,10 @@ def run(root,out,cfg):
     modules_root=Path(__file__).resolve().parents[1]
     sources=['model4/workflow.py','model2/model.py','model2/modules.py','model2/config.py',
              'floodlib/schema.py','floodlib/blocks.py','floodlib/traincfg.py']
+    if cfg.revision not in ['v1','v2']:
+        raise ValueError('Unknown Model 4 revision.')
+    if cfg.revision == 'v2':
+        sources += ['model4/upgrade.py','model4/data_audit.py']
     identity=dict(config=asdict(cfg),data_sha256=file_hash(root/'flood_dataset.parquet'),
                   nodes_sha256=file_hash(root/'nodes.csv'),
                   source_sha256={name:file_hash(modules_root/name) for name in sources})
@@ -708,10 +721,23 @@ def run(root,out,cfg):
                            numpy=np.__version__,python=platform.python_version(),
                            resume_migrations=migrations,
                            gpu=torch.cuda.get_device_name(0) if device.type=='cuda' else None))
-    data=prepare(pd.read_parquet(root/'flood_dataset.parquet'),pd.read_csv(root/'nodes.csv'),cfg)
+    if cfg.revision == 'v2':
+        from model4.data_audit import read_training_panel, audit_images
+        frame, storage = read_training_panel(root/'flood_dataset.parquet')
+        data=prepare(frame,pd.read_csv(root/'nodes.csv'),cfg)
+        del frame
+        data['audit']['storage'] = storage
+        data['audit']['image_audit'] = audit_images(data)
+        data['audit']['revision'] = 'v2: full sequence plus summary/current branches; no pixel training'
+        json_save(out/'image_audit.json',data['audit']['image_audit'])
+    else:
+        data=prepare(pd.read_parquet(root/'flood_dataset.parquet'),pd.read_csv(root/'nodes.csv'),cfg)
     json_save(out/'data_audit.json',data['audit']); np.savez_compressed(out/'preprocessing.npz',**data['norm'])
     architectures={}
-    for name in ['model4','model2_control','model4_current']:
+    schedule=([('model4',cfg.seeds),('model2_control',cfg.seeds),('model4_summary',cfg.seeds)]
+              if cfg.revision == 'v2' else
+              [('model4',cfg.seeds),('model2_control',cfg.seeds),('model4_current',(cfg.seeds[0],))])
+    for name,_ in schedule:
         model=build_model(name,data,cfg)
         architectures[name]={'parameters':sum(p.numel() for p in model.parameters())}
         if name=='model2_control':
@@ -722,7 +748,6 @@ def run(root,out,cfg):
     deadline=time.monotonic()+cfg.budget_hours*3600
     preds={}; seed_metrics={}; pending=[]
     # Model 4 first, then the paired architecture control, then a cheap ablation.
-    schedule=[('model4',cfg.seeds),('model2_control',cfg.seeds),('model4_current',(cfg.seeds[0],))]
     for name,seeds in schedule:
         collected={k:[] for k in ['calibrate','test']}; details=[]
         for seed in seeds:

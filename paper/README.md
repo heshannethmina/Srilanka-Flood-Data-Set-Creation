@@ -1,9 +1,9 @@
 # IEEE DNN research manuscript
 
-**Terrain-Conditioned Deep Neural Networks for Next-Day High-Flow Prediction in
-Sri Lanka** — revised 8 September 2026.
+**A Day Before the Flood: Terrain-Aware Neural Forecasting of River High-Flow Events in
+Sri Lanka** — revised 24 September 2026.
 
-This is a seven-page IEEE conference-format research draft focused on MMF-Net's
+This is a six-page IEEE conference-format research draft focused on MMF-Net's
 neural representation, attention, static conditioning, objective and radar
 fusion. The original manuscript is preserved in `archive/original-2026-09-08/`.
 
@@ -11,7 +11,7 @@ fusion. The original manuscript is preserved in `archive/original-2026-09-08/`.
 
 | File | Purpose |
 |---|---|
-| `main.tex` | Editable IEEE source; author fields remain to be completed |
+| `main.tex` | Editable IEEE source with the supplied author block |
 | `main.pdf` | Compiled manuscript |
 | `make_figures.py` | Reproducibly builds the five vector data figures |
 | `figures/` | Five data figures; architecture is drawn in LaTeX |
@@ -51,6 +51,6 @@ radar gains. Exact model-eligible counts, prediction-level graphs and confidence
 intervals require the missing panel/run artifacts. The catalogue plot is an
 actual count of the supplied event file, not a substitute for those artifacts.
 
-Author details and final experimental evidence remain necessary before
-submission. See `REVISION_NOTES.md` for the specific evidence gaps. No target
-venue or page limit has been selected; standard IEEE conference layout is used.
+Final experimental evidence remains necessary before submission. See
+`REVISION_NOTES.md` for the specific evidence gaps. The source uses the official
+IEEE conference class without custom margin, font-size, or line-spacing changes.

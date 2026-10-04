@@ -11,39 +11,35 @@
 \newcommand{\model}{MMF-Net}
 \newcommand{\bce}{N5\_bce}
 \begin{document}
-\title{Terrain-Conditioned Deep Neural Networks for\\Next-Day High-Flow Prediction in Sri Lanka}
-% Author details remain editable; no identity is inferred.
-\author{\IEEEauthorblockN{{[Author Name(s)]}}
-\IEEEauthorblockA{\textit{{[Department, Institution]}}\\
-{[City]}, Sri Lanka\\{[Email address(es)]}}}
+\title{A Day Before the Flood: Terrain-Aware Neural Forecasting of River High-Flow Events in Sri Lanka}
+\author{%
+\IEEEauthorblockN{%
+Heshan Nethmina, Ranuga Weerasekara, Dinithi Navodya, Manuja Ranathunga,\\
+and Vinma Wettasinghe}
+\IEEEauthorblockA{%
+Department of Computer Science \& Engineering\\
+University of Moratuwa, Moratuwa, Sri Lanka\\
+\texttt{\{heshann.23, ranugaw.23, dinithin.23, manujar.23, vinmaw.23\}@cse.mrt.ac.lk}}
+}
 \maketitle
 
 \begin{abstract}
-Deep neural networks can combine antecedent rainfall, river discharge and
-catchment characteristics for flood-related prediction, but their usefulness
-depends on both the representation learned and the validity of the evaluation.
-This study examines MMF-Net, a terrain-conditioned temporal transformer for
-next-day high-flow prediction at 51 river-basin locations in Sri Lanka. The
-network encodes 14-day sequences of 33 dynamic variables using periodic
-numerical embeddings, temporal self-attention and cross-feature attention,
-with nine static attributes supplied through feature-wise linear modulation.
-An optional Sentinel-1 branch supports an exploratory assessment of radar
-fusion. The primary target is exceedance of a training-period discharge
-percentile in GloFAS-derived data; it is a hydrological proxy rather than an
-observed inundation label. In the recorded temporal experiments, replacing
-linear embeddings with periodic embeddings increases test average precision
-from 0.6083 to 0.7605. The terrain-conditioned five-seed ensemble trained with
-binary cross-entropy reaches 0.8355, with a Brier score of 0.0080 and expected
-calibration error of 0.0016. These results support further investigation of
-numerical representations and static conditioning in neural flood models.
-Single-seed ablations, incomplete radar controls and limited agreement between
-proxy labels and documented floods constrain interpretation. We identify the
-observations and evaluation steps required to assess the model as a
-flood-warning decision-support component.
+This paper evaluates MMF-Net, a terrain-conditioned temporal transformer for
+next-day high-flow prediction at 51 Sri Lankan river-basin locations. It encodes
+14-day sequences of 33 dynamic variables with periodic numerical embeddings,
+temporal and cross-feature attention, and nine static attributes supplied
+through feature-wise linear modulation. The target is exceedance of a
+training-period Global Flood Awareness System (GloFAS) discharge percentile,
+not observed inundation. In recorded temporal experiments, periodic embeddings
+increase test average precision (AP) from 0.6083 to 0.7605; a terrain-conditioned
+five-seed binary-cross-entropy ensemble reaches AP 0.8355, Brier score 0.0080
+and expected calibration error 0.0016. Results support further controlled study
+of numerical representation and static conditioning. Interpretation is limited
+by single-seed ablations, incomplete radar controls and proxy supervision.
 \end{abstract}
 \begin{IEEEkeywords}
-deep neural networks, temporal transformer, numerical embeddings,
-terrain conditioning, flood prediction, Sri Lanka
+MMF-Net, next-day high-flow classification, periodic numerical embeddings,
+terrain-conditioned transformer, GloFAS discharge reanalysis, Sri Lankan river basins
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -65,22 +61,29 @@ discharge reanalysis is evaluated against that reanalysis. Its performance
 cannot be interpreted directly as accuracy against measured water levels,
 inundation extent or damage.
 
-This paper investigates \model{}, a deep network that combines a temporal
-transformer with periodic numerical embeddings, cross-feature attention and
-static conditioning. The research emphasis is on neural representation and
-fusion: how continuous hydrometeorological inputs are encoded, how static
-attributes modify the learned state, and whether an additional radar branch
-provides useful information. Conventional reference models provide context
-for the difficulty of the target; the principal experiments concern the DNN
-and its component ablations.
+This paper investigates \model{}, a deep neural network (DNN) combining a
+temporal transformer, periodic numerical embeddings, cross-feature attention
+and static conditioning. It documents the implemented architecture and recorded
+ablations while separating them from non-matched historical baselines.
 
-Three questions guide the analysis: (1) how do numerical embeddings,
+Three research questions (RQs) guide the analysis: (RQ1) how do numerical embeddings,
 cross-feature attention and terrain conditioning affect the recorded neural
-prediction scores; (2) how do the training objective and ensemble calibration
-affect ranking and probability quality; and (3) what evidence is available for
-radar fusion and practical warning use? The contribution is an application
-study of established neural components in Sri Lanka, with explicit
-experimental controls and limitations.
+prediction scores; (RQ2) how do the training objective and ensemble calibration
+affect ranking and probability quality; and (RQ3) what evidence is available for
+radar fusion and practical warning use?
+
+\section{Contributions}
+This study makes three bounded contributions. First, it documents a
+terrain-conditioned neural architecture that combines periodic numerical
+embeddings, temporal and cross-feature attention, static feature-wise linear
+modulation (FiLM), and an explicitly optional radar branch. Second, it reports
+the recorded chronological ablations on one consistent main DNN snapshot,
+including the effects of numerical representation, feature interaction, static
+conditioning, training objective, ensembling, and temperature scaling. Third,
+it distinguishes reanalysis-based high-flow ranking from observed-flood or
+operational-warning performance, and records the evidence that remains needed:
+prediction arrays, matched baselines, uncertainty estimates, issue-time inputs,
+and independent gauge or inundation validation.
 
 \section{Related Work}
 \subsection{Neural hydrological forecasting}
@@ -111,35 +114,29 @@ Kirschstein and Sun found that their neural forecasting models did not benefit
 from the supplied river topology \cite{kirschstein2024}. This motivates a
 controlled question rather than a presumption that adding edges improves
 forecasting. \model{} is graph-free: weights are shared across locations, but
-predictions do not exchange messages between them. Earlier graph-network
-experiments are discussed separately because their encoder and data extent
-differ from those of the main DNN.
+predictions do not exchange messages between them.
 
 \subsection{Probability quality and evaluation}
 Focal loss was introduced to address the dominance of easy examples in dense
 object detection \cite{lin2017}; its suitability for hydrological
-classification is an empirical question. Deep ensembles and temperature
-scaling provide established approaches to probability estimation and post-hoc
+classification is an empirical question. Deep ensembles and temperature scaling
+provide established approaches to probability estimation and post-hoc
 calibration \cite{lakshminarayanan2017,guo2017}. Under rare positive events,
 precision--recall analysis complements threshold-based verification
 \cite{saito2015}. Temporally structured observations also require an evaluation
-design that respects their dependence \cite{roberts2017}. These ideas inform
-our interpretation of the DNN results and their practical limits.
+design that respects their dependence \cite{roberts2017}.
 
 \section{Study Data and Prediction Task}
 \label{sec:data}
 \subsection{Spatial coverage and input provenance}
-The node inventory contains 51 locations in 16 basin or area groups, including
-the Colombo metropolitan group. It assigns 31 nodes to the wet zone, 13 to the
-dry zone and seven to the intermediate zone. Fig.~\ref{fig:map} shows their
-coordinates and the 35 curated directed flow links. These are representative
-modelling locations; the experiments do not use measured discharge from 51
-gauges. The graph files also contain 204 spatial links for the separate
-graph-based models. Lines in the map indicate connectivity and do not trace
-surveyed river channels.
+The inventory has 51 locations in 16 basin or area groups: 31 wet-zone, 13
+dry-zone and seven intermediate-zone nodes. Fig.~\ref{fig:map} shows their
+coordinates and 35 curated directed flow links. These are modelling locations,
+not 51 measured-discharge gauges; lines indicate connectivity rather than
+surveyed channels.
 
 \begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{fig_study_area.pdf}
+\centering\includegraphics[width=.78\linewidth]{fig_study_area.pdf}
 \caption{Study locations and curated upstream-to-downstream links. Colours and
 marker shapes identify the inventory's climatic-zone categories. Country
 outline: Natural Earth. Hydrological basin boundaries are not shown.}
@@ -147,39 +144,38 @@ outline: Natural Earth. Hydrological basin boundaries are not shown.}
 \end{figure}
 
 NASA POWER supplies base daily meteorological and soil-wetness variables
-\cite{power}. The feature builder preferentially uses cached Open-Meteo
-Archive precipitation where available, falling back to POWER precipitation.
-The archive request does not pin a particular reanalysis model version.
-Discharge is obtained through the Open-Meteo Flood API from the GloFAS product
-family \cite{harrigan2020,openmeteo}. Elevation in the supplied node table
-comes from POWER response metadata. Product versions and the proportions of
-precipitation sources need to be retained in a data manifest to reproduce
-the exact historical panel.
+\cite{power}. The feature builder preferentially uses cached Open-Meteo Archive
+precipitation where available, falling back to POWER precipitation. Discharge
+is obtained through the Open-Meteo Flood API from the GloFAS product family
+\cite{harrigan2020,openmeteo}. Product versions and precipitation-source
+proportions should be retained in a data manifest before replication.
 
-The 33 dynamic inputs comprise 11 rainfall and antecedent-rainfall variables,
-seven temperature, humidity, wind and radiation variables, six soil-wetness
-variables, and nine discharge variables. Discharge features include recent
-changes, rolling means, seasonal anomalies and the empirical percentile.
-The nine static inputs comprise elevation, log mean-training-discharge as a
-drainage proxy, three climatic-zone indicators and four network-position
-indicators. The drainage proxy is not a measured catchment area.
+The 33 dynamic inputs comprise rainfall and antecedent-rainfall variables,
+temperature, humidity, wind and radiation variables, soil-wetness variables,
+and discharge variables. Discharge features include recent changes, rolling
+means, seasonal anomalies and the empirical percentile. The nine static inputs
+comprise elevation, log mean-training-discharge as a drainage proxy, three
+climatic-zone indicators and four network-position indicators. The drainage
+proxy is not a measured catchment area.
 
 Selected heavy-tailed dynamic variables undergo a signed $\log(1+|x|)$
-transformation followed by standardisation. Dynamic statistics are fitted on
-the temporal training subset. Discharge percentile references and climatologies
-are fitted through 2017. Static continuous attributes are standardised across
-the node inventory. Missing normalised dynamic values are replaced with zero,
-corresponding to the training mean; the main tabular stream has no separate
-missingness mask.
+transformation followed by standardisation. Dynamic statistics are fitted on the
+temporal training subset, while discharge percentile references and
+climatologies are fitted through 2017. Static continuous attributes are
+standardised across the node inventory. Missing normalised dynamic values are
+replaced with zero, corresponding to the training mean; the main tabular stream
+has no separate missingness mask.
 
 \subsection{Targets and episode definition}
 Let $Q_{n,t}$ denote reanalysis discharge at location $n$ on day $t$. The
-high-flow state and primary next-day target are
+high-flow state and primary next-day target are defined in
+\eqref{eq:thresholds}:
 \begin{align}
 \tau_n &= \operatorname{quantile}_{0.98}
        \{Q_{n,t}:t\leq\text{2017-12-31}\},\\
 s_{n,t} &= \mathbf{1}[Q_{n,t}\geq\tau_n],\qquad
 y^{(1)}_{n,t}=s_{n,t+1}.
+\label{eq:thresholds}
 \end{align}
 This percentile of daily discharge is a relative high-flow threshold, not a
 calibrated return-period estimate or an official warning-stage threshold. It
@@ -191,34 +187,27 @@ $y^{(o)}_{n,t}=(1-s_{n,t})s_{n,t+1}$. Two regression heads predict the next-day
 discharge percentile and the maximum discharge z-score over the next three
 days. All reported main-model scores concern $y^{(1)}$, not the onset head.
 
-Episodes are constructed separately at each node by grouping positive state
-days whose successive dates are at most two days apart. A one-day
-non-exceedance gap may therefore lie inside an episode span. These are
-node-level proxy episodes: a single storm can produce several episodes at
-different nodes. They are not independent national disasters.
+Episodes group positive state days at each node when successive dates are at
+most two days apart. They are node-level proxy episodes, not independent
+national disasters.
 
 \subsection{Coverage and data-version scope}
-The main DNN configuration truncates inputs after 31 December 2024. The supplied
-episode catalogue contains 1,469 entries through 2025, of which 1,464 start in
-2003--2024. Fig.~\ref{fig:episodes} summarises the retained catalogue without
-interpreting its annual variation as a trend in observed disasters.
+Inputs end on 31 December 2024. The supplied catalogue has 1,464 proxy episodes
+starting in 2003--2024. Fig.~\ref{fig:episodes} records the retained catalogue;
+its annual counts should not be interpreted as a trend in observed disasters.
 
 \begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{fig_episode_profile.pdf}
+\centering
+\includegraphics[width=\linewidth]{fig_episode_profile.pdf}
 \caption{Annual counts of node-level proxy episodes with onset in 2003--2024,
 computed from the supplied catalogue (1,464 entries). Divisions indicate the
-temporal training, validation and test periods. These are catalogue counts,
-not the episodes eligible for a particular model's evaluation.}
+temporal training, validation, and test periods. These are catalogue counts,
+not the episodes eligible for a particular model evaluation.}
 \label{fig:episodes}
 \end{figure}
 
-The earlier validation report lists 409,350 valid node-days, including 75,555
-test records, but covers a panel extending into 2025. Those totals cannot
-describe the truncated DNN experiment without a new panel audit. We report the
-protocol dates in Table~\ref{tab:settings} and retain historical performance
-values as recorded. Exact post-filter sample counts must be recovered from run
-artifacts before submission; the full panel and saved predictions are absent
-from the current paper checkout.
+Exact post-filter sample counts and saved predictions are absent; historical
+totals extending into 2025 are not used to describe the truncated DNN experiment.
 
 \section{Deep Neural Network Method}
 \label{sec:method}
@@ -227,11 +216,12 @@ For a prediction issued after day $t$, the input is
 $\mathbf{X}_{n,t}\in\mathbb{R}^{14\times33}$, ending on that day. Nodes are
 folded into the batch dimension, so the same network processes every node's
 history independently. For scalar feature $j$, the periodic--linear--ReLU
-(PLR) representation is
+(PLR) representation is defined by \eqref{eq:plr}:
 \begin{equation}
 \mathbf{e}_j(x)=\operatorname{ReLU}\!\left(
 \mathbf{W}_j[\sin(2\pi\mathbf{c}_j x)\Vert
 \cos(2\pi\mathbf{c}_j x)]+\mathbf{b}_j\right),
+\label{eq:plr}
 \end{equation}
 where $\mathbf{c}_j\in\mathbb{R}^{8}$ contains trainable frequencies and
 $\mathbf{e}_j\in\mathbb{R}^{8}$. This supplies a flexible nonlinear
@@ -248,18 +238,22 @@ state is the temporal representation $\mathbf{h}^{T}$.
 The feature branch uses the same embeddings, averaged over the 14-day window.
 Each feature is projected to a 128-dimensional token with a learned feature
 identity. A one-layer transformer pools these tokens to produce
-$\mathbf{h}^{F}$. The branches merge additively:
+$\mathbf{h}^{F}$. The branches merge additively as shown in \eqref{eq:merge}:
 \begin{equation}
 \mathbf{h}=\operatorname{LN}(\mathbf{h}^{T}+\mathbf{h}^{F}).
+\label{eq:merge}
 \end{equation}
 This branch explicitly attends across feature tokens. Averaging first reduces
 its computational cost but removes observation order within each feature token.
+Here and below, $\operatorname{LN}$ denotes layer normalisation.
 
-An MLP maps the static vector $\mathbf{s}_n\in\mathbb{R}^{9}$ to
-$\gamma_n$ and $\beta_n$, giving
+A multilayer perceptron (MLP) maps the static vector $\mathbf{s}_n\in\mathbb{R}^{9}$ to
+$\gamma_n$ and $\beta_n$, giving the conditioned representation in
+\eqref{eq:film}:
 \begin{equation}
 \widetilde{\mathbf{h}}=\operatorname{LN}
  [\mathbf{h}\odot(1+\gamma_n)+\beta_n].
+\label{eq:film}
 \end{equation}
 The final conditioning layer is zero-initialised, so the initial affine
 modulation is neutral. Layer normalisation still applies; the full FiLM block
@@ -267,51 +261,44 @@ is not an identity map. A fusion MLP of widths 192 and 128 and a shared head of
 widths 256 and 128 produce classification logits and regression outputs.
 Fig.~\ref{fig:architecture} shows the implemented data flow.
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\resizebox{\textwidth}{!}{%
-\begin{tikzpicture}[font=\small,
- b/.style={draw=black!65,rounded corners=2pt,align=center,minimum height=10mm,
- text width=1.8cm,inner sep=4pt,fill=blue!4},
- a/.style={-{Stealth[length=2mm]},thick,black!65}]
-\node[b] (x) at (0,0) {14-day history\\33 variables};
-\node[b] (e) at (2.6,0) {PLR embeddings\\8 values / feature};
-\node[b,text width=2.6cm] (t) at (5.8,0.9) {Temporal transformer\\3 layers, width 128};
-\node[b,text width=2.6cm] (f) at (5.8,-0.9) {Time mean + feature attention\\33 feature tokens};
-\node[b,text width=1.6cm] (m) at (8.6,0) {Add +\\LayerNorm};
-\node[b] (film) at (10.8,0) {FiLM static\\conditioning};
-\node[b] (s) at (10.8,1.6) {9 static attributes\\conditioning MLP};
-\node[b,dashed,fill=orange!7,text width=2.5cm] (sar) at (6.7,-2.8) {Optional SAR CNN + gate\\exploratory variants};
-\node[b,dashed,fill=orange!7] (img) at (2.6,-2.8) {Sentinel-1 chips\\VV / VH + age};
-\node[b,text width=2.1cm] (head) at (10.8,-2.8) {Fusion MLP\\shared prediction head};
-\node[b,text width=2.2cm] (out) at (14,-2.8) {4 classification\\2 regression outputs};
-\draw[a] (x)--(e);
-\draw[a] (e.east) -- ++(0.3,0) |- (t.west);
-\draw[a] (e.east) -- ++(0.3,0) |- (f.west);
-\draw[a] (t.east) -- ++(0.3,0) |- (m.west);
-\draw[a] (f.east) -- ++(0.3,0) |- (m.west);
-\draw[a] (m)--(film); \draw[a] (s)--(film);
-\draw[a] (film)--node[right,font=\scriptsize]{main DNN path}(head);
-\draw[a,dashed] (film.south) -- ++(0,-1.3) -| (sar.north);
-\draw[a,dashed] (img)--(sar);
-\draw[a,dashed] (sar)--(head); \draw[a] (head)--(out);
-\end{tikzpicture}}
+\begin{tikzpicture}[font=\footnotesize,
+ b/.style={draw=black!65,rounded corners=2pt,align=center,minimum height=7mm,
+ text width=2.35cm,inner sep=3pt,fill=blue!4},
+ opt/.style={b,dashed,fill=orange!7},
+ a/.style={-{Stealth[length=1.7mm]},thick,black!65}]
+\node[b] (x) {14-day history: 33 dynamic variables};
+\node[b,below=5mm of x] (e) {PLR embeddings: 8 values per feature};
+\node[b,below=5mm of e] (t) {Temporal transformer (3 layers) + time-mean feature attention};
+\node[b,below=5mm of t] (film) {Add + LayerNorm with FiLM static conditioning};
+\node[b,below=5mm of film] (head) {Fusion MLP and shared prediction head};
+\node[b,below=5mm of head] (out) {4 classification and 2 regression outputs};
+\node[b,text width=2.0cm,right=1mm of film] (s) {9 static attributes: conditioning MLP};
+\node[opt,left=7mm of head] (sar) {Optional Sentinel-1 VV/VH chips: SAR CNN + gate};
+\draw[a] (x)--(e)--(t)--(film)--(head)--(out);
+\draw[a] (s)--(film); \draw[a,dashed] (sar)--(head);
+\end{tikzpicture}
 \caption{\model{} data flow. Temporal and cross-feature attention are parallel
 branches sharing numerical embeddings. Static attributes condition their
 merged state. The principal configuration uses the solid path; optional radar
 fusion is applied before the fusion MLP. No graph message passing is used.}
 \label{fig:architecture}
-\end{figure*}
+\end{figure}
 
-\subsection{Optional radar branch}
-The CNN variant encodes two-channel Sentinel-1 VV/VH chips and adds their
+\subsection{Optional synthetic-aperture radar branch}
+The convolutional neural network (CNN) variant encodes two-channel Sentinel-1
+vertical-transmit/vertical-receive (VV) and vertical-transmit/horizontal-receive (VH)
+chips and adds their
 projection through a learned gate. For radar embedding $\mathbf{v}$,
-presence indicator $m$ and image age $a$, the fusion is
+presence indicator $m$ and image age $a$, the fusion is specified in
+\eqref{eq:radar}:
 \begin{align}
 \mathbf{g}&=\sigma\{\operatorname{MLP}
  [\widetilde{\mathbf{h}}\Vert\mathbf{v}\Vert m\Vert(a/30)]\},\\
 \mathbf{h}^{S}&=\operatorname{LN}
  (\widetilde{\mathbf{h}}+m\,\mathbf{g}\odot\mathbf{W}_v\mathbf{v}).
+\label{eq:radar}
 \end{align}
 The gate's final bias is initialised to $-3$, giving a small, nonzero opening;
 absent frames contribute zero through $m$. A scalar variant instead appends
@@ -324,13 +311,14 @@ experiment.
 \subsection{Multi-task optimisation and calibrated inference}
 The reference objective sums masked binary cross-entropy (BCE) over four heads,
 with weights $(1.0,0.3,0.3,0.5)$, and adds the mean Huber loss over the two
-regressions with weight 0.2. The alternative \texttt{focal\_conf} objective
+regressions with weight 0.2 \cite{huber1964}. The alternative \texttt{focal\_conf} objective
 uses focal loss with $\alpha=0.75$, $\gamma=2$, and a label-confidence weight
 between 0.5 and 1 that decreases near the current-day discharge threshold.
 The comparison changes class weighting, focusing and confidence weighting
 jointly; it is not an isolated test of the focal exponent.
 
-AdamW uses a learning rate of $10^{-3}$, weight decay $10^{-4}$, five warmup
+The implementation uses PyTorch \cite{paszke2019}. AdamW \cite{loshchilov2019}
+uses a learning rate of $10^{-3}$, weight decay $10^{-4}$, five warmup
 epochs and a cosine schedule. Training lasts at most 60 epochs, with gradient
 norm clipping at 1.0 and early-stopping patience of ten. Checkpoints are selected
 by validation episode-level average precision, falling back to node-day average
@@ -338,9 +326,11 @@ precision if the episode score is undefined.
 
 For five-seed ensembles, the implementation averages predicted probabilities,
 not logits. If $p_k$ is the probability from seed $k$, calibration uses
+\eqref{eq:calibration}:
 \begin{equation}
 \bar p=\frac{1}{5}\sum_{k=1}^{5}p_k,\qquad
 p_{\mathrm{cal}}=\sigma\!\left[\frac{\operatorname{logit}(\bar p)}{T}\right].
+\label{eq:calibration}
 \end{equation}
 The temperature $T$ is fitted on validation data. The decision threshold is
 selected by validation F1 and frozen for test evaluation. The reported
@@ -348,6 +338,9 @@ operating points do not use a common false-alarm budget.
 
 \section{Experimental Design}
 \subsection{Main DNN ablations and historical references}
+Table~\ref{tab:settings} gives the recorded temporal protocol and operational
+settings. These values describe the stored run snapshot, not a new rerun.
+
 \begin{table}[t]
 \caption{Main temporal DNN configuration.}
 \label{tab:settings}
@@ -369,57 +362,51 @@ Checkpoint / threshold & Validation episode AP / F1 \\
 \end{tabular}
 \end{table}
 
-The main evidence is the August 2026 \model{} result snapshot retained in the
-repository. N0--N3 successively introduce PLR embeddings, feature attention and
-FiLM conditioning. N4 replaces BCE with \texttt{focal\_conf}; N5 adds a
-five-seed ensemble and temperature scaling to that objective. \bce{} applies
-the same ensemble procedure to N3 with BCE. N6 variants explore radar scalars
-and gated CNN fusion under \texttt{focal\_conf}. The radar rows therefore do
-not continue the BCE configuration under a matched objective.
-
-Earlier experiments include a GRU-based spatiotemporal graph network
-(TF-STGNN) and persistence, climatology, discharge-percentile and LightGBM
-references. Those runs predate the December 2024 truncation policy. A direct
-ranking against \model{} would confound data extent with the model. These
-historical results appear in a separate table and are excluded from the main
-ablation plots.
+The temporal split is 2003--2017 for training, 2018--2020 for validation and
+2021--2024 for testing. Inputs contain 14 days of 33 dynamic and nine static
+variables. N0--N3 successively introduce PLR embeddings, feature attention and
+FiLM; N4 changes to \texttt{focal\_conf}; N5 adds a five-seed ensemble and
+temperature scaling; and \bce{} applies the same ensemble to N3 with BCE.
+N6 radar variants use \texttt{focal\_conf}, so they are not matched BCE controls.
+Historical tree and graph runs use a different panel and are not ranked against
+\model{}.
 
 \subsection{Metrics and their interpretation}
-The stored metric named PR-AUC is computed as stepwise average precision (AP),
-$\sum_i P_i\Delta R_i$, rather than a trapezoidal area. We use AP throughout.
-The implementation sorts individual samples without grouping equal scores;
-tied-score references, especially binary persistence, need a standard
-tie-aware recomputation before direct comparison.
+The stored metric named precision--recall area under the curve is computed as
+stepwise average precision (AP), $\sum_i P_i\Delta R_i$, rather than a
+trapezoidal area; we use AP throughout. The implementation sorts individual
+samples without grouping equal scores, so tied-score references require a
+standard tie-aware recomputation before direct comparison.
 
 Node-day quantities are probability of detection,
 $\mathrm{POD}=TP/(TP+FN)$; false-alarm ratio,
 $\mathrm{FAR}=FP/(TP+FP)$; and critical success index,
 $\mathrm{CSI}=TP/(TP+FP+FN)$. FAR is the fraction of positive predictions that
-are false alarms, not $FP/(FP+TN)$. Brier score averages $(p-y)^2$.
-Expected calibration error (ECE) uses 15 equal-width probability bins,
-weighted by sample counts. Under class imbalance, a small aggregate ECE can
-coexist with poor calibration in sparsely populated high-risk bins.
+are false alarms, not $FP/(FP+TN)$. Brier score averages $(p-y)^2$. Expected
+calibration error (ECE) uses 15 equal-width probability bins, weighted by
+sample counts. Under class imbalance, a small aggregate ECE can coexist with
+poor calibration in sparsely populated high-risk bins.
 
 Episode detection credits any alarm at a node during the seven days preceding
-its episode onset. Validation episode AP scores each eligible episode by the
-maximum probability in that window and uses flood-free node-weeks as negatives.
-This is a retrospective association statistic. Because the model predicts the
-next day, an alarm six days before onset is not evidence of a calibrated six-day
-forecast. An onset-specific assessment should align the evaluation window with
-the stated horizon and require complete pre-onset coverage.
+its episode onset. This is a retrospective association statistic. Because the
+model predicts the next day, an alarm six days before onset is not evidence of
+a calibrated six-day forecast. An onset-specific assessment should align the
+evaluation window with the operational lead time.
 
 \section{Results}
+The following analyses address RQ1 through the N0--N3 representation and
+conditioning ablations, RQ2 through the objective and ensemble comparisons,
+and RQ3 through the radar and practical-use evidence.
+
 \subsection{Neural representation and static conditioning}
-Table~\ref{tab:ablation} reports the recorded \model{} results.
-PLR embeddings increase AP from 0.6083 to 0.7605, an absolute change of 0.1522.
-Feature attention produces a further increase to 0.7738, followed by 0.8269
-with static FiLM conditioning. These observations are consistent with the
-value of flexible scalar representations and location-dependent conditioning.
-The FiLM contrast does not isolate elevation from the drainage proxy, zone and
-position indicators supplied to the same module.
+Table~\ref{tab:ablation} reports the recorded \model{} results. PLR embeddings
+increase AP from 0.6083 to 0.7605, feature attention to 0.7738 and static FiLM
+to 0.8269. The FiLM contrast combines elevation, drainage proxy, zone and
+position indicators.
 
 \begin{table}[t]
-\caption{Main DNN results on the temporal test split.}
+\caption{Main DNN results on the temporal test split. AP: average precision;
+ECE: expected calibration error; FAR: false-alarm ratio; Params: parameter count.}
 \label{tab:ablation}
 \centering\footnotesize
 \begin{tabular}{@{}llrrrr@{}}
@@ -438,7 +425,6 @@ N6-sc & SAR scalars, focal & .7284 & .0055 & .344 & .719 \\
 N6-gat & SAR CNN, focal & .8310 & .0066 & .107 & 11.967 \\
 \bottomrule
 \end{tabular}
-\vspace{2pt}
 \parbox{\columnwidth}{\scriptsize TS: temperature scaling. N0--N4: one seed;
 others: five. Params: millions per member. ``Focal'': combined focal/confidence
 objective. Bold marks the largest recorded AP, not significance.
@@ -453,28 +439,15 @@ available; the plot does not establish statistical significance.}
 \label{fig:ladder}
 \end{figure}
 
-N0--N4 each use one seed. Their differences describe these runs rather than
-statistically established component effects. The reported 0.3375--0.3856 range
-across \bce{} seeds concerns best-validation \emph{episode} AP. It cannot
-serve as an uncertainty interval for differences in test \emph{node-day} AP.
-Paired test predictions and repeated controlled runs are needed for an
-uncertainty analysis on the same estimand.
+Fig.~\ref{fig:ladder} shows the same AP values. N0--N4 are single-seed runs,
+so their differences are descriptive rather than significance-tested effects.
 
 \subsection{Objective, ensemble and calibration}
-Replacing BCE with the combined focal/confidence objective changes N3's AP
-from 0.8269 to 0.7592 and ECE from 0.0032 to 0.0525. In the ensemble
-comparison, \bce{} records AP 0.8355 and ECE 0.0016, compared with 0.7846 and
-0.0043 for N5. These observations favour BCE under the evaluated settings.
-They do not establish that focal loss is generally unsuitable for flood
-prediction or identify which part of the combined weighting causes the change.
-
-The \bce{} ensemble has reported Brier score 0.0080 and CSI 0.561. Its AP
-exceeds N3's by 0.0086. Ensembling and temperature scaling are changed together,
-so their separate effects on probability quality are not identified. A positive
-temperature preserves score ordering within a fixed ensemble; it changes
-probabilities and threshold behaviour rather than AP. Reliability curves, bin
-counts and event-stratified calibration would be more informative than ECE
-alone, but cannot be recovered from the available aggregate results.
+The focal/confidence objective changes N3's AP/ECE from 0.8269/0.0032 to
+0.7592/0.0525. \bce{} records 0.8355/0.0016 versus N5's 0.7846/0.0043,
+favouring BCE in these settings. Its Brier score is 0.0080 and CSI is 0.561.
+Ensembling and temperature scaling change together, so their separate effects
+are not identified.
 
 \subsection{Radar fusion and model size}
 The scalar radar variant records AP 0.7284. The gated CNN records 0.8310,
@@ -486,148 +459,64 @@ pretraining status and limited coverage prevent attribution to radar alone.
 
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{fig_capacity.pdf}
-\caption{Reported parameter count per member and AP for selected DNNs.
-The horizontal axis is logarithmic. The gated CNN has about 16.8 times the
-reported parameters of the image-free model. Counts do not measure latency,
-memory consumption or the benefit of radar information.}
+\caption{Reported parameter count per member and AP for selected DNNs. The
+horizontal axis is logarithmic; parameter count does not measure latency or
+the value of radar information.}
 \label{fig:capacity}
 \end{figure}
 
-Fig.~\ref{fig:capacity} illustrates the resource implications. \bce{} has
-approximately 0.711 million reported parameters per member, whereas N6-gat has
-11.967 million. A five-member image-free ensemble stores approximately
-3.56 million parameters across its members and requires five forward passes.
-The training code counts parameters with gradients enabled, so checkpoint
-freeze status must accompany any final model-size comparison. Device-level
-latency and deployment energy were not measured.
+Fig.~\ref{fig:capacity} places this comparison in a resource context. \bce{}
+has 0.711 million reported parameters per member; N6-gat has 11.967 million.
+The five-member image-free ensemble therefore requires five forward passes,
+while device-level latency and energy remain unmeasured.
 
 \subsection{Detection at recorded operating points}
-Fig.~\ref{fig:operating} shows event detection alongside node-day FAR for
-selected DNN configurations. N2 detects 0.423 of episodes under the seven-day
-rule at FAR 0.313; N3 records detection 0.197 at FAR 0.110; and \bce{} records
-0.220 at FAR 0.120. Each point reflects both the model and its validation-selected
-threshold. These are not points along a shared operating curve and do not
-establish which network is preferable at a fixed false-alarm budget.
+Fig.~\ref{fig:operating} shows episode detection and node-day FAR for selected
+DNN configurations. N2 detects 0.423 of episodes at FAR 0.313; N3 records
+0.197 at FAR 0.110; and \bce{} records 0.220 at FAR 0.120. Each point uses its
+own validation-selected threshold, so these are not a common operating curve.
 
 \begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{fig_operating_points.pdf}
-\caption{Selected DNN operating points. Detection credits any alarm in the
-seven days before onset; FAR is calculated over node-days. Each point uses
-its own validation-selected threshold. The axes have different aggregation
-units and are not an event-level precision--recall curve.}
+\centering
+\includegraphics[width=\linewidth]{fig_operating_points.pdf}
+\caption{Selected DNN operating points. Detection credits an alarm in the
+seven days before onset; FAR is calculated over node-days. Each point uses its
+own validation-selected threshold, so the plot is not an event-level
+precision--recall curve.}
 \label{fig:operating}
 \end{figure}
 
-\subsection{Historical references and split diagnostics}
-\begin{table}[t]
-\caption{Historical references (2 August 2026); panel extent differs from
-Table~\ref{tab:ablation}. Dashes indicate unavailable values.}
-\label{tab:legacy}
-\centering\footnotesize
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-Reference & AP & Brier & FAR & Detection \\
-\midrule
-Persistence & .590 & -- & .231 & .223 \\
-Climatology & .108 & -- & .882 & .515 \\
-Discharge percentile & .816 & -- & .231 & .223 \\
-LightGBM & .8496 & .0076 & .080 & .161 \\
-GRU only (M0) & .598 & .0137 & .441 & .262 \\
-TF-STGNN (M3) & .704 & .0135 & .342 & .380 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\section{Discussion and Limitations}
+The model is a probability-ranking component, not an operational warning
+system. Reanalysis-derived high flow does not establish accuracy against gauges,
+inundation or impacts. One-day lead time must be measured from input publication
+times, and radar frames must be available at issue time.
 
-The historical discharge-percentile reference achieves AP approximately 0.816,
-consistent with substantial persistence in a next-day discharge target.
-LightGBM records 0.8496 on its historical panel (Table~\ref{tab:legacy}).
-These values motivate strong references in a matched rerun; they do not
-establish a DNN-versus-tree ordering on an identical test set. Comparing
-graph-based M3 with \model{} would likewise change the encoder and panel as
-well as graph structure.
+The reported DNN sequence is informative for controlled representation choices,
+but not for a definitive model ranking. N0--N4 are single-seed comparisons, and
+the focal/confidence objective changes class weighting and confidence weighting
+together. Likewise, the five-seed configurations combine ensembling with
+temperature scaling. The recorded results therefore identify promising settings,
+not separated causal effects or statistically tested improvements. Confidence
+intervals, paired resampling, and a documented test-set freeze are required
+before treating the AP differences as robust.
 
-The M3 diagnostic records AP 0.704 under temporal splitting and 0.905 under
-random splitting, while seven-day event detection changes from 0.380 to 0.089.
-The random protocol interleaves node-days across train and test. Furthermore,
-the event routine receives only held-out rows: random masking can remove
-pre-onset alarm opportunities and shift the first observed episode day. The
-diagnostic demonstrates sensitivity to the split, but does not isolate a causal
-loss of warning skill or prove memorisation of neighbouring days. The Gin
-holdout (AP 0.840) concerns spatial transfer on four inventory nodes, with
-training at other nodes spanning later dates. It is not a future-time test.
-Strict spatial evaluation also requires reconsidering held-out-node
-preprocessing statistics and graph access.
+Radar evidence has a second comparability limitation. The scalar and gated-CNN
+variants use the focal/confidence family rather than a matched BCE control, and
+their reported batch sizes, coverage, and pretraining status differ. Their
+scores cannot isolate either the value of radar or the value of graph structure.
+Historical scores are development evidence: saved predictions, run manifests,
+post-filter sample counts, and per-horizon prediction arrays are absent.
 
-\section{Practical Interpretation and Limitations}
-\subsection{From proxy prediction to warning support}
-The proposed use is a candidate ranking and probability component for an
-analyst's river-monitoring workflow. A practical workflow would assemble
-available inputs at a defined daily issue time, verify freshness and coverage,
-run the network, and present probabilities alongside measured water levels and
-recent rainfall. The responsible agency would determine how outputs relate to
-local warning stages and actions. This is a proposed application, not a system
-validated by the present experiments.
-
-The one-day target requires particular care. A daily total for day $t$ is fully
-known only after that day, and reanalysis fields may be published or revised
-later. Operational lead time must be measured from actual input availability,
-not simply from date labels. Replay using archived, issue-time observations
-and forecasts is needed before claiming 24-hour warning capability. Radar
-images must similarly be restricted to acquisitions available at issue time,
-with image age tracked explicitly.
-
-\subsection{Independent evidence and failure cases}
-The historical validation report compares the proxy state against selected
-documented flood windows. Restricting its list to 2003--2024, the high-flow
-threshold activates in seven of ten windows; the lower threshold activates in
-eight. The high threshold misses the listed May 2003, June 2014 and May 2017
-windows. This is a limited check of label agreement, not DNN event detection,
-and it does not estimate warning accuracy on a representative sample. The
-reported successes also use basin-level matching and expanded date windows,
-which are less demanding than correct daily predictions at individual nodes.
-
-Observed gauge levels, discharge and independently mapped inundation would
-allow evaluation of failures that reanalysis labels cannot expose. Cases
-should include missed floods, false alarms, rapid-onset events and regulated
-rivers, alongside correct predictions. An event hydrograph should display
-issue time, available rainfall and discharge, model probability, the frozen
-threshold and independently recorded onset. Such plots require aligned
-observations and predictions; aggregate scores cannot supply them.
-
-\balance
-\subsection{Temporal boundaries and reproducibility}
-The 14-day windows may include earlier-period features at split boundaries.
-Using preceding validation-period observations to initialise a test forecast
-is causal when those observations were available. A separate issue arises
-because auxiliary future targets are constructed before split assignment and
-input truncation. Horizons near a boundary can reach into the next block or
-beyond the declared input end date. A final rerun should purge boundary-crossing
-supervised targets and verify complete horizons explicitly.
-
-Scores were retained from a hand-compiled experiment snapshot; underlying
-predictions, exact run manifests and post-truncation counts must accompany a
-submission. Repeated inspection of the same test set during architecture
-development also means these results should be treated as development evidence.
-A new time period or prespecified external evaluation is needed for final
-confirmation.
-
-\subsection{Priority experiments}
-The next DNN comparison should hold the panel, targets, seeds, optimisation
-budget and test rows fixed. It should repeat the embedding and FiLM ablations,
-separating static-attribute contributions where possible. Graph message passing
-can then be added to the same encoder; the unrun STG-Former implementation in
-the repository is not evidence of a benefit. A radar comparison should use the
-same BCE objective, a documented checkpoint, and results on both common-coverage
-nodes and the complete panel.
-
-For decision-oriented evaluation, thresholds should be fitted on validation
-under a stated FAR constraint and then frozen. Realised test FAR must still
-be reported because the validation constraint may not hold under distribution
-shift. Event detection should require full pre-onset coverage and horizon-aligned
-alarms, supplemented by false warning episodes per basin-month. Paired
-uncertainty intervals should preserve storm or temporal dependence across
-nodes; calibration should include bin counts and high-probability subsets.
-These are additional experiments, not outcomes of the current study.
+\section{Future Work}
+Future work should rerun neural and tree baselines on one fixed panel with
+common seeds, objectives and thresholds; retain prediction arrays for paired
+uncertainty intervals and calibration curves; and evaluate against independent
+gauges or inundation with issue-time inputs. A deployment-oriented evaluation
+should state an alarm policy in advance, replay only data available at the
+decision time, and report both episode detection and false-alarm burden at a
+shared operating point. This would distinguish calibration improvements from
+an actionable warning benefit.
 
 \section{Conclusion}
 This study examines a terrain-conditioned deep neural network for next-day
@@ -647,6 +536,7 @@ Code and catalogue files are available at
 The complete training panel, checkpoints and predictions are absent from the
 reviewed checkout. Figure inputs and provenance accompany the manuscript.
 
+\balance
 \section*{Acknowledgment}
 We acknowledge NASA POWER, Copernicus GloFAS, Open-Meteo and Sentinel-1 data
 providers, public flood-report sources and Natural Earth.
@@ -693,6 +583,14 @@ doi: 10.1371/journal.pone.0118432.
 for data with temporal, spatial, hierarchical, or phylogenetic structure,''
 \emph{Ecography}, vol. 40, no. 8, pp. 913--929, 2017,
 doi: 10.1111/ecog.02881.
+\bibitem{huber1964} P. J. Huber, ``Robust estimation of a location
+parameter,'' \emph{Ann. Math. Stat.}, vol. 35, no. 1, pp. 73--101, 1964,
+doi: 10.1214/aoms/1177703732.
+\bibitem{paszke2019} A. Paszke \emph{et al.}, ``PyTorch: An imperative style,
+high-performance deep learning library,'' in \emph{Advances in Neural
+Information Processing Systems}, vol. 32, 2019.
+\bibitem{loshchilov2019} I. Loshchilov and F. Hutter, ``Decoupled weight decay
+regularization,'' in \emph{Proc. ICLR}, 2019.
 \bibitem{power} NASA POWER, ``Meteorology: Data sources and methodology.''
 [Online]. Available: \url{https://power.larc.nasa.gov/docs/methodology/meteorology/}.
 Accessed: Sep. 8, 2026.
